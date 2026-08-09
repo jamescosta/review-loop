@@ -49,6 +49,13 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
 4. Tell the reviewer the artifact URL and the turn number. If a tab was
    already open, they must refresh — the page banner says so too.
 
+**One live surface.** The published URL is the loop's identity, and the
+reviewer only ever sees the page through it. Never show `.review/artifact.html`
+(or any rebuilt copy) to the reviewer in a local pane, preview, or second
+publish — a page outside the published URL is a dead copy: it looks live,
+carries no sign that it isn't, and every review sent from it is built on the
+wrong state and bounces.
+
 ## Applying the review
 
 The reviewer sends the review blob back as pasted JSON or a downloaded file —
