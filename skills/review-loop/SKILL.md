@@ -52,7 +52,7 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
 ## Applying the review
 
 The reviewer sends the review blob back as pasted JSON or a downloaded file —
-`{turn, checksum, docName, doc, comments}`. Never edit or interpret its
+`{turn, checksum, docName, doc, comments, resolved}`. Never edit or interpret its
 contents: the script verifies and applies it. The blob's `docName` names the
 document but not the project folder; if the conversation doesn't establish
 which project, ask rather than guessing. Save a pasted blob to a file
@@ -68,7 +68,8 @@ the cause and the recovery step, and a rejection never partially applies.
 Relay a rejection's message to the reviewer verbatim.
 
 On success it applies the reviewer's edits to the file, commits under their
-name, and lists every comment thread awaiting a reply.
+name, marks any threads the reviewer resolved (those leave the next turn and
+need no reply), and lists every comment thread awaiting a reply.
 
 ## Closing the turn
 

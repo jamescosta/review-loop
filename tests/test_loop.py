@@ -220,6 +220,51 @@ def test_apply_happy_path_then_already_applied(project, tmp_path):
     assert threads[0]["messages"][-1] == {"author": "agent", "body": "Because X."}
 
 
+def test_resolve_flow(project, tmp_path):
+    # Turn 1: a comment creates thread c1-1.
+    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
+    blob = make_blob(base, turn=1, comments=[
+        {"id": "c1-1", "reply_to": None,
+         "anchor": {"text": "first paragraph", "occurrence": 0,
+                    "before": "", "after": ", improved"},
+         "body": "A question"}])
+    bf = tmp_path / "b1.json"
+    write_lf(bf, json.dumps(blob))
+    assert run(["apply", project, "--blob", bf, "--reviewer", "R"]).returncode == 0
+
+    # Turn 2: the reviewer resolves it.
+    r = run(["agent-commit", project, "--summary", "next pass"])
+    assert r.returncode == 0, r.stderr
+    base2 = (project / ".review" / "base.md").read_text(encoding="utf-8")
+    blob2 = make_blob(base2, turn=2, resolved=["c1-1"])
+    bf2 = tmp_path / "b2.json"
+    write_lf(bf2, json.dumps(blob2))
+    r = run(["apply", project, "--blob", bf2, "--reviewer", "R"])
+    assert r.returncode == 0, r.stderr
+    assert "Resolved thread(s): c1-1" in r.stdout
+    threads = json.loads((project / ".review" / "comments.json").read_text())["threads"]
+    assert threads[0]["resolved"] is True and threads[0]["pending_reply"] is False
+
+    # Resolved threads leave the next turn's artifact data.
+    run(["agent-commit", project, "--summary", "turn 3"])
+    assert run(["build-artifact", project]).returncode == 0
+    html = (project / ".review" / "artifact.html").read_text(encoding="utf-8")
+    payload = html.split('<script id="rl-data" type="application/json">')[1].split("</script>")[0]
+    assert json.loads(payload)["threads"] == []
+
+
+def test_apply_rejects_unknown_resolve_id(project, tmp_path):
+    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
+    blob = make_blob(base, turn=1, resolved=["no-such-thread"])
+    bf = tmp_path / "blob.json"
+    write_lf(bf, json.dumps(blob))
+    r = run(["apply", project, "--blob", bf, "--reviewer", "R"])
+    assert r.returncode == 2
+    assert "unknown thread" in r.stderr
+    state = json.loads((project / ".review" / "state.json").read_text())
+    assert state["applied"] is False
+
+
 def test_apply_rejects_malformed_comment_without_mutating(project, tmp_path):
     base = (project / ".review" / "base.md").read_text(encoding="utf-8")
     blob = make_blob(base, turn=1, comments=[

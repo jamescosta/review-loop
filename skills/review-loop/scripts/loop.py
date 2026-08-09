@@ -362,7 +362,7 @@ def cmd_build_artifact(args):
         "baseDoc": read_text(rd / "base.md"),
         "checksum": state["base_checksum"],
         "diff": json.loads(read_text(rd / "diff.json")),
-        "threads": load_threads(project),
+        "threads": [t for t in load_threads(project) if not t.get("resolved")],
     }
     template = read_text(Path(__file__).parent / "template.html")
     # Embedding safety: JSON in a data script tag with `<` escaped, so a doc
@@ -421,6 +421,10 @@ def cmd_apply(args):
 
     threads = load_threads(project)
     known = {t["id"] for t in threads}
+    resolved_ids = blob.get("resolved", [])
+    for rid in resolved_ids:
+        if rid not in known:
+            fail(f"resolve targets unknown thread {rid} — blob malformed; send again.")
     for c in blob["comments"]:
         if not isinstance(c.get("body"), str) or not c["body"].strip():
             fail(f"comment {c.get('id')} has no body — blob malformed; send again.")
@@ -456,6 +460,10 @@ def cmd_apply(args):
             threads.append({"id": c["id"], "anchor": c["anchor"], "pending_reply": True,
                             "messages": [{"author": args.reviewer, "body": c["body"]}]})
             new_threads.append(c["id"])
+    for rid in resolved_ids:
+        t = next(t for t in threads if t["id"] == rid)
+        t["resolved"] = True
+        t["pending_reply"] = False
     save_threads(project, threads)
 
     state["applied"] = True
@@ -466,6 +474,8 @@ def cmd_apply(args):
          "blob_checksum": blob["checksum"]}, indent=2) + "\n")
 
     print(f"Applied turn {state['turn']} review from {args.reviewer}: {detail}.")
+    if resolved_ids:
+        print(f"Resolved thread(s): {', '.join(resolved_ids)} — they leave the next turn.")
     pending = [t for t in threads if t.get("pending_reply")]
     if pending:
         print("Threads awaiting an agent reply:")
