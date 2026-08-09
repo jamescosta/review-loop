@@ -1,0 +1,843 @@
+<title>Review loop — __DOC_TITLE__</title>
+<style>
+  :root {
+    --bg: #fafbfc; --panel: #f1f3f6; --fg: #1c2430; --muted: #5c6773;
+    --border: #d5dae1; --accent: #3556c7; --accent-fg: #ffffff;
+    --ins-bg: #e2f4e5; --ins-fg: #14571f; --del-bg: #fbe4e4; --del-fg: #8c1a1a;
+    --warn-bg: #fff3d6; --warn-fg: #6b4d00; --danger-bg: #fbdada; --danger-fg: #7c1212;
+    --code-bg: #eceff3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161a20; --panel: #1e242d; --fg: #e3e8ee; --muted: #96a0ac;
+      --border: #333b46; --accent: #7c96ea; --accent-fg: #10131a;
+      --ins-bg: #1c3a22; --ins-fg: #9fd8a8; --del-bg: #46201f; --del-fg: #eda8a8;
+      --warn-bg: #3d3212; --warn-fg: #e8c76a; --danger-bg: #4a1c1c; --danger-fg: #f0a2a2;
+      --code-bg: #262d37;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161a20; --panel: #1e242d; --fg: #e3e8ee; --muted: #96a0ac;
+    --border: #333b46; --accent: #7c96ea; --accent-fg: #10131a;
+    --ins-bg: #1c3a22; --ins-fg: #9fd8a8; --del-bg: #46201f; --del-fg: #eda8a8;
+    --warn-bg: #3d3212; --warn-fg: #e8c76a; --danger-bg: #4a1c1c; --danger-fg: #f0a2a2;
+    --code-bg: #262d37;
+  }
+  :root[data-theme="light"] {
+    --bg: #fafbfc; --panel: #f1f3f6; --fg: #1c2430; --muted: #5c6773;
+    --border: #d5dae1; --accent: #3556c7; --accent-fg: #ffffff;
+    --ins-bg: #e2f4e5; --ins-fg: #14571f; --del-bg: #fbe4e4; --del-fg: #8c1a1a;
+    --warn-bg: #fff3d6; --warn-fg: #6b4d00; --danger-bg: #fbdada; --danger-fg: #7c1212;
+    --code-bg: #eceff3;
+  }
+  body { background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif; margin: 0; }
+  header { padding: 1.2rem 1.5rem .9rem; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 1.25rem; margin: 0 0 .2rem; }
+  .turn-note, .doc-name { color: var(--muted); font-size: .82rem; }
+  .summary { max-width: 68ch; margin: .6rem 0 0; }
+  .questions { max-width: 68ch; margin: .4rem 0 0; padding-left: 1.4rem; }
+  .questions li { margin: .15rem 0; }
+  .qlabel { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-top: .7rem; }
+  .toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
+    padding: .6rem 1.5rem; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  button { font: inherit; font-size: .85rem; padding: .35rem .8rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--fg); cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
+    background: var(--bg); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .spacer { flex: 1; }
+  .notice { margin: .8rem 1.5rem 0; padding: .55rem .9rem; border-radius: 6px;
+    font-size: .85rem; }
+  .notice.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .notice.danger { background: var(--danger-bg); color: var(--danger-fg); }
+  .notice button { margin-left: .6rem; font-size: .78rem; padding: .15rem .5rem; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem;
+    padding: 1.2rem 1.5rem 4rem; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .doc { max-width: 72ch; min-height: 8rem; }
+  .doc:focus-visible { outline: none; }
+  #clean[contenteditable="true"] { border-left: 3px solid transparent; padding-left: .8rem; }
+  #clean[contenteditable="true"]:focus-within { border-left-color: var(--accent); }
+  .doc h1 { font-size: 1.5rem; } .doc h2 { font-size: 1.25rem; } .doc h3 { font-size: 1.05rem; }
+  .doc h1, .doc h2, .doc h3, .doc h4 { text-wrap: balance; }
+  .doc code { background: var(--code-bg); border-radius: 4px; padding: .08em .3em;
+    font: .88em ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  .doc pre { background: var(--code-bg); border-radius: 6px; padding: .7rem .9rem;
+    overflow-x: auto; }
+  .doc pre code { background: none; padding: 0; }
+  .doc a { color: var(--accent); }
+  #changes ins, .ins-block { background: var(--ins-bg); color: var(--ins-fg);
+    text-decoration: none; }
+  #changes del, .del-block { background: var(--del-bg); color: var(--del-fg); }
+  .ins-block, .del-block { display: block; padding: .1rem .5rem; border-radius: 4px; }
+  .changes-note { color: var(--muted); font-size: .82rem; font-style: italic; }
+  aside { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: .9rem; font-size: .87rem; position: sticky; top: 3.4rem;
+    max-height: calc(100vh - 5rem); overflow-y: auto; }
+  aside h2 { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 .6rem; }
+  .thread { border-top: 1px solid var(--border); padding: .6rem 0; }
+  .thread:first-of-type { border-top: none; }
+  .anchor-quote { color: var(--muted); font-size: .8rem; font-style: italic;
+    cursor: pointer; }
+  .anchor-quote:hover { color: var(--accent); }
+  .orphan { color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px;
+    padding: .1rem .4rem; font-size: .78rem; display: inline-block; margin-bottom: .2rem; }
+  .msg { margin: .35rem 0 0; }
+  .msg .author { font-weight: 600; font-size: .78rem; }
+  .msg.agent .author { color: var(--accent); }
+  .thread textarea, #comment-form textarea, #send-modal textarea {
+    width: 100%; box-sizing: border-box; font: inherit; background: var(--bg);
+    color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
+    padding: .4rem; margin-top: .4rem; }
+  .thread .reply-row { display: flex; gap: .4rem; margin-top: .3rem; }
+  .remove-comment { float: right; font-size: .7rem; padding: .05rem .35rem; }
+  #comment-btn { position: absolute; z-index: 20; display: none;
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+    font-size: .78rem; padding: .2rem .55rem; }
+  #comment-form { display: none; margin-bottom: .8rem; padding-bottom: .8rem;
+    border-bottom: 2px solid var(--accent); }
+  #send-modal { display: none; position: fixed; inset: 0;
+    background: color-mix(in srgb, var(--fg) 25%, transparent); z-index: 40; }
+  #send-modal .box { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; max-width: 620px; margin: 8vh auto 0; padding: 1.1rem 1.3rem;
+    display: flex; flex-direction: column; gap: .6rem; }
+  #send-modal textarea { font: .78rem ui-monospace, Consolas, monospace; height: 9rem; }
+  #send-status { font-size: .84rem; min-height: 1.2em; }
+  .btn-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+
+<header>
+  <h1>Turn <span id="turn-no"></span></h1>
+  <div class="turn-note">If chat says a later turn exists, refresh this page.
+    <span class="doc-name" id="doc-name"></span></div>
+  <p class="summary" id="summary"></p>
+  <div id="questions-wrap">
+    <div class="qlabel">Questions for you</div>
+    <ol class="questions" id="questions"></ol>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button id="view-clean" aria-pressed="true">Clean view (edit here)</button>
+  <button id="view-changes" aria-pressed="false">Changes view</button>
+  <span class="spacer"></span>
+  <button id="send-btn" class="primary">Send review</button>
+</div>
+
+<div id="notices"></div>
+
+<main>
+  <div>
+    <div id="clean" class="doc" contenteditable="true" spellcheck="true"></div>
+    <div id="changes" class="doc" hidden>
+      <p class="changes-note">Read-only. Insertions are highlighted, deletions struck.
+        To reject a change, flip to clean view and edit it back.</p>
+      <div id="changes-body"></div>
+    </div>
+  </div>
+  <aside>
+    <h2>Comments</h2>
+    <div id="comment-form">
+      <div class="anchor-quote" id="form-quote"></div>
+      <textarea id="form-body" rows="3" placeholder="Your comment"></textarea>
+      <div class="btn-row" style="margin-top:.4rem">
+        <button id="form-add" class="primary">Add comment</button>
+        <button id="form-cancel">Cancel</button>
+      </div>
+    </div>
+    <div id="threads"></div>
+  </aside>
+</main>
+
+<button id="comment-btn">💬 Comment</button>
+
+<div id="send-modal">
+  <div class="box">
+    <strong>Send review</strong>
+    <div id="send-hint">Copy the review and paste it into the chat — or download it
+      and send the file. Both carry the same review.</div>
+    <textarea id="send-blob" readonly></textarea>
+    <div class="btn-row">
+      <button id="copy-btn" class="primary">Copy to clipboard</button>
+      <button id="download-btn">Download file</button>
+      <button id="close-modal">Close</button>
+    </div>
+    <div id="send-status"></div>
+  </div>
+</div>
+
+<script id="rl-data" type="application/json">__REVIEW_LOOP_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("rl-data").textContent);
+
+/* ---------------------------------------------------------------- checksum
+   FNV-1a 32-bit over UTF-8 bytes — must match fnv1a() in loop.py. */
+function fnv1a(str) {
+  const bytes = new TextEncoder().encode(str);
+  let h = 0x811c9dc5;
+  for (const b of bytes) { h ^= b; h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/* ------------------------------------------------------ markdown block model
+   splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
+   drift, the round-trip self-check reports false mismatches. */
+const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
+
+function splitBlocks(doc) {
+  const blocks = []; let cur = []; let fence = false;
+  for (const ln of doc.split("\n")) {
+    const stripped = ln.trim();
+    if (!fence && stripped.startsWith("```")) {
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+      fence = true; cur.push(ln); continue;
+    }
+    if (fence) {
+      cur.push(ln);
+      if (stripped.startsWith("```") && cur.length > 1) {
+        fence = false; blocks.push(cur.join("\n")); cur = [];
+      }
+      continue;
+    }
+    if (stripped === "") {
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+    } else cur.push(ln);
+  }
+  if (cur.length) blocks.push(cur.join("\n"));
+  return blocks;
+}
+
+function blockKind(block) {
+  const first = block.split("\n", 1)[0];
+  if (first.trimStart().startsWith("```")) return "fence";
+  if (/^#{1,6}\s/.test(first)) return "heading";
+  if (LIST_LINE.test(first)) return "list";
+  return "para";
+}
+
+const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
+
+function normalize(doc) {
+  doc = doc.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/ /g, " ");
+  const out = [];
+  for (const b of splitBlocks(doc)) {
+    const kind = blockKind(b);
+    const lines = b.split("\n");
+    if (kind === "fence") {
+      out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
+    } else if (kind === "heading") {
+      out.push(collapse(lines[0]));
+      const rest = collapse(lines.slice(1).join(" "));
+      if (rest) out.push(rest);
+    } else if (kind === "list") {
+      const items = [];
+      for (const l of lines) {
+        const c = collapse(l);
+        if (!c) continue;
+        const m = LIST_LINE.exec(l);
+        if (m) {
+          const level = Math.floor(m[1].length / 2);
+          const marker = /^\d/.test(m[2]) ? "1." : "-";
+          items.push(("  ".repeat(level) + marker + " " + collapse(l.slice(m[0].length))).trimEnd());
+        } else if (items.length) {
+          items[items.length - 1] += " " + c;
+        } else items.push(c);
+      }
+      out.push(items.join("\n"));
+    } else {
+      out.push(collapse(lines.join(" ")));
+    }
+  }
+  return out.join("\n\n");
+}
+
+/* ------------------------------------------------------------- renderer */
+function renderInline(text, parent) {
+  let i = 0; let buf = "";
+  const flush = () => { if (buf) { parent.appendChild(document.createTextNode(buf)); buf = ""; } };
+  while (i < text.length) {
+    const rest = text.slice(i); let m;
+    if ((m = rest.match(/^`([^`]+)`/))) {
+      flush(); const c = document.createElement("code"); c.textContent = m[1];
+      parent.appendChild(c); i += m[0].length;
+    } else if ((m = rest.match(/^\*\*(.+?)\*\*/))) {
+      flush(); const s = document.createElement("strong"); renderInline(m[1], s);
+      parent.appendChild(s); i += m[0].length;
+    } else if ((m = rest.match(/^\*([^*\s][^*]*)\*/))) {
+      flush(); const s = document.createElement("em"); renderInline(m[1], s);
+      parent.appendChild(s); i += m[0].length;
+    } else if ((m = rest.match(/^\[([^\]]+)\]\(([^)\s]+)\)/))) {
+      flush(); const a = document.createElement("a"); a.setAttribute("href", m[2]);
+      renderInline(m[1], a); parent.appendChild(a); i += m[0].length;
+    } else { buf += text[i]; i += 1; }
+  }
+  flush();
+}
+
+function renderBlock(block, container) {
+  const kind = blockKind(block);
+  const lines = block.split("\n");
+  if (kind === "fence") {
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    pre.dataset.lang = lines[0].trim().slice(3).trim();
+    code.textContent = lines.slice(1, lines[lines.length - 1].trim().startsWith("```")
+      ? lines.length - 1 : lines.length).join("\n");
+    pre.appendChild(code); container.appendChild(pre);
+  } else if (kind === "heading") {
+    const level = lines[0].match(/^#{1,6}/)[0].length;
+    const h = document.createElement("h" + level);
+    renderInline(lines[0].replace(/^#{1,6}\s+/, ""), h);
+    container.appendChild(h);
+    const rest = lines.slice(1).join(" ").trim();
+    if (rest) { const p = document.createElement("p"); renderInline(rest, p); container.appendChild(p); }
+  } else if (kind === "list") {
+    const items = [];
+    for (const l of lines) {
+      const m = LIST_LINE.exec(l);
+      if (m) {
+        items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
+          text: l.slice(m[0].length) });
+      } else if (items.length) items[items.length - 1].text += " " + l.trim();
+      else items.push({ level: 0, ordered: false, text: l.trim() });
+    }
+    const stack = [];
+    for (const item of items) {
+      while (stack.length && stack[stack.length - 1].level > item.level) stack.pop();
+      const top = () => stack[stack.length - 1];
+      if (stack.length && top().level === item.level &&
+          (top().list.tagName === "OL") !== item.ordered) stack.pop();
+      while (!stack.length || top().level < item.level) {
+        const level = stack.length ? top().level + 1 : 0;
+        const list = document.createElement(item.ordered ? "ol" : "ul");
+        if (stack.length) {
+          (top().list.lastElementChild || top().list).appendChild(list);
+        } else container.appendChild(list);
+        stack.push({ list, level });
+        if (level >= item.level) break;
+      }
+      const li = document.createElement("li");
+      renderInline(item.text, li);
+      top().list.appendChild(li);
+    }
+  } else {
+    const p = document.createElement("p");
+    renderInline(lines.join(" "), p);
+    container.appendChild(p);
+  }
+}
+
+function renderMarkdown(md, container) {
+  container.textContent = "";
+  for (const b of splitBlocks(md)) renderBlock(b, container);
+}
+
+/* ------------------------------------------------------------ serializer
+   The single serializer: editable DOM back to markdown, covering exactly
+   the rendered subset. Inverse of the renderer over that subset. */
+const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
+  "UL", "OL", "PRE", "BLOCKQUOTE"]);
+
+function serializeInline(node) {
+  if (node.nodeType === 3) return node.nodeValue.replace(/ /g, " ");
+  if (node.nodeType !== 1) return "";
+  const tag = node.tagName;
+  if (tag === "BR") return "\n";
+  const inner = Array.from(node.childNodes).map(serializeInline).join("");
+  if (tag === "STRONG" || tag === "B") return inner ? "**" + inner + "**" : "";
+  if (tag === "EM" || tag === "I") return inner ? "*" + inner + "*" : "";
+  if (tag === "CODE") return node.textContent ? "`" + node.textContent + "`" : "";
+  if (tag === "A") return "[" + inner + "](" + (node.getAttribute("href") || "") + ")";
+  return inner;
+}
+
+function serializeList(listEl, depth) {
+  const lines = []; let idx = 1;
+  for (const child of listEl.children) {
+    if (child.tagName === "UL" || child.tagName === "OL") {
+      lines.push(...serializeList(child, depth + 1));
+      continue;
+    }
+    if (child.tagName !== "LI") continue;
+    let content = ""; const sublists = [];
+    for (const n of child.childNodes) {
+      if (n.nodeType === 1 && (n.tagName === "UL" || n.tagName === "OL")) sublists.push(n);
+      else content += serializeInline(n);
+    }
+    const marker = listEl.tagName === "OL" ? `${idx}. ` : "- ";
+    lines.push("  ".repeat(depth) + marker + collapse(content));
+    for (const s of sublists) lines.push(...serializeList(s, depth + 1));
+    idx += 1;
+  }
+  return lines;
+}
+
+function serializeContainer(root, blocks) {
+  let run = [];
+  const flushRun = () => {
+    if (!run.length) return;
+    const text = run.map(serializeInline).join("");
+    if (text.trim()) blocks.push(text.trim());
+    run = [];
+  };
+  for (const node of root.childNodes) {
+    if (node.nodeType === 1 && BLOCK_TAGS.has(node.tagName)) {
+      flushRun();
+      const tag = node.tagName;
+      if (/^H[1-6]$/.test(tag)) {
+        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        if (t) blocks.push("#".repeat(+tag[1]) + " " + t);
+      } else if (tag === "UL" || tag === "OL") {
+        const lines = serializeList(node, 0);
+        if (lines.length) blocks.push(lines.join("\n"));
+      } else if (tag === "PRE") {
+        const lang = node.dataset.lang || "";
+        blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
+      } else if (tag === "DIV" &&
+          Array.from(node.children).some((c) => BLOCK_TAGS.has(c.tagName))) {
+        serializeContainer(node, blocks);
+      } else {
+        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        if (t) blocks.push(t);
+      }
+    } else run.push(node);
+  }
+  flushRun();
+}
+
+function serialize(root) {
+  const blocks = [];
+  serializeContainer(root, blocks);
+  return blocks.join("\n\n") + "\n";
+}
+
+/* ----------------------------------------------------------- changes view
+   Skill-computed diff decorated into a read-only render. Word-level ops use
+   private-use marker chars that survive markdown rendering, then become
+   ins/del elements — decoration never enters the editable DOM. */
+const INS_O = "\uE000", INS_C = "\uE001", DEL_O = "\uE002", DEL_C = "\uE003";
+
+function decorateMarkers(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let state = null;
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    if (!/[\uE000-\uE003]/.test(text) && !state) continue;
+    const frag = document.createDocumentFragment();
+    let buf = "";
+    const flush = () => {
+      if (!buf) return;
+      if (state) { const el = document.createElement(state); el.textContent = buf; frag.appendChild(el); }
+      else frag.appendChild(document.createTextNode(buf));
+      buf = "";
+    };
+    for (const ch of text) {
+      if (ch === INS_O) { flush(); state = "ins"; }
+      else if (ch === DEL_O) { flush(); state = "del"; }
+      else if (ch === INS_C || ch === DEL_C) { flush(); state = null; }
+      else buf += ch;
+    }
+    flush();
+    node.parentNode.replaceChild(frag, node);
+  }
+}
+
+function buildChangesView(container) {
+  container.textContent = "";
+  for (const part of DATA.diff) {
+    if (part.t === "eq") { renderBlock(part.md, container); continue; }
+    if (part.t === "ins" || part.t === "del") {
+      const wrap = document.createElement("div");
+      wrap.className = part.t === "ins" ? "ins-block" : "del-block";
+      renderBlock(part.md, wrap);
+      container.appendChild(wrap);
+      continue;
+    }
+    const merged = part.ops.map(([op, txt]) =>
+      op === "eq" ? txt : op === "del" ? DEL_O + txt + DEL_C : INS_O + txt + INS_C).join("");
+    const wrap = document.createElement("div");
+    renderBlock(merged, wrap);
+    decorateMarkers(wrap);
+    while (wrap.firstChild) container.appendChild(wrap.firstChild);
+  }
+}
+
+/* ----------------------------------------------------- doc text + anchors */
+function docTextAndMap(root) {
+  let text = ""; const map = [];
+  (function walk(node) {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { map.push({ node: child, start: text.length }); text += child.nodeValue; }
+      else if (child.nodeType === 1) {
+        walk(child);
+        if (BLOCK_TAGS.has(child.tagName)) text += "\n";
+      }
+    }
+  })(root);
+  return { text: text.replace(/ /g, " "), map };
+}
+
+function pointOffset(container, offset, root, map, text) {
+  if (container.nodeType === 3) {
+    const entry = map.find((e) => e.node === container);
+    return entry ? entry.start + offset : null;
+  }
+  // Element boundary: use the first text node at or after the child position.
+  let target = container.childNodes[offset] || null;
+  while (target && target.nodeType !== 3 && target.firstChild) target = target.firstChild;
+  if (target && target.nodeType === 3) {
+    const entry = map.find((e) => e.node === target);
+    return entry ? entry.start : null;
+  }
+  return offset === 0 ? 0 : text.length;
+}
+
+function locateAnchor(anchor, root) {
+  const { text, map } = docTextAndMap(root);
+  let idx = -1; let from = 0;
+  for (let k = 0; k <= anchor.occurrence; k += 1) {
+    idx = text.indexOf(anchor.text, from);
+    if (idx < 0) return null;
+    from = idx + 1;
+  }
+  return { idx, map, text };
+}
+
+/* ---------------------------------------------------------------- app */
+const clean = document.getElementById("clean");
+const changesEl = document.getElementById("changes");
+const noticesEl = document.getElementById("notices");
+const threadsEl = document.getElementById("threads");
+let outgoing = [];          // reviewer-authored comments/replies this turn
+let commentSeq = 1;
+let editingEnabled = true;
+let storageOK = false;
+const storageKey = `rl-${DATA.checksum}-${DATA.turn}`;
+
+function notice(cls, html) {
+  const div = document.createElement("div");
+  div.className = "notice " + cls;
+  div.innerHTML = html;
+  noticesEl.appendChild(div);
+  return div;
+}
+
+/* Header */
+document.getElementById("turn-no").textContent = DATA.turn;
+document.getElementById("doc-name").textContent = "· " + DATA.docName;
+document.getElementById("summary").textContent = DATA.summary;
+const qWrap = document.getElementById("questions-wrap");
+if (DATA.questions.length) {
+  for (const q of DATA.questions) {
+    const li = document.createElement("li"); li.textContent = q;
+    document.getElementById("questions").appendChild(li);
+  }
+} else qWrap.remove();
+
+/* Render + self-check: round-trip our own unedited DOM against the embedded
+   base; on mismatch the turn is not used. */
+renderMarkdown(DATA.baseDoc, clean);
+let selfCheckOK = true;
+if (fnv1a(DATA.baseDoc) !== DATA.checksum) {
+  selfCheckOK = false;
+  notice("danger", "<strong>Self-check failed:</strong> the embedded document does not " +
+    "match its checksum — this page is corrupt. Don't review here; tell the agent " +
+    "the self-check failed so it can rebuild the turn.");
+} else if (normalize(serialize(clean)) !== normalize(DATA.baseDoc)) {
+  selfCheckOK = false;
+  notice("danger", "<strong>Self-check failed:</strong> this page cannot faithfully " +
+    "capture edits to this document (round-trip mismatch). Don't review here — " +
+    "tell the agent the self-check failed so it can rebuild the turn. " +
+    "This turn will not be used.");
+}
+if (!selfCheckOK) {
+  editingEnabled = false;
+  clean.setAttribute("contenteditable", "false");
+  document.getElementById("send-btn").disabled = true;
+}
+
+buildChangesView(document.getElementById("changes-body"));
+
+/* Autosave probe (build-day-one verification 2): if storage doesn't survive
+   the sandbox, the page carries the persistent unsent-edits notice. */
+try {
+  localStorage.setItem("rl-probe", "1");
+  localStorage.removeItem("rl-probe");
+  storageOK = true;
+} catch (e) { storageOK = false; }
+if (!storageOK) {
+  notice("warn", "Unsent edits are lost if you close this tab — send your review " +
+    "before closing.");
+} else if (selfCheckOK) {
+  const saved = localStorage.getItem(storageKey);
+  if (saved) {
+    try {
+      const draft = JSON.parse(saved);
+      renderMarkdown(draft.doc, clean);
+      outgoing = draft.outgoing || [];
+      commentSeq = draft.seq || outgoing.length + 1;
+      const n = notice("warn", "Restored unsent edits from an earlier visit. ");
+      const btn = document.createElement("button");
+      btn.textContent = "Discard restored edits";
+      btn.addEventListener("click", () => {
+        localStorage.removeItem(storageKey);
+        outgoing = []; renderMarkdown(DATA.baseDoc, clean);
+        renderThreads(); n.remove();
+      });
+      n.appendChild(btn);
+    } catch (e) { localStorage.removeItem(storageKey); }
+  }
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  if (!storageOK || !selfCheckOK) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(storageKey,
+        JSON.stringify({ doc: serialize(clean), outgoing, seq: commentSeq }));
+    } catch (e) { /* storage full or revoked — the notice already warned */ }
+  }, 400);
+}
+clean.addEventListener("input", scheduleSave);
+
+/* Paste is stripped to plain text. */
+clean.addEventListener("paste", (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+  document.execCommand("insertText", false, text);
+});
+
+/* View toggle */
+const btnClean = document.getElementById("view-clean");
+const btnChanges = document.getElementById("view-changes");
+function setView(which) {
+  clean.hidden = which !== "clean";
+  changesEl.hidden = which !== "changes";
+  btnClean.setAttribute("aria-pressed", String(which === "clean"));
+  btnChanges.setAttribute("aria-pressed", String(which === "changes"));
+  hideCommentBtn();
+}
+btnClean.addEventListener("click", () => setView("clean"));
+btnChanges.addEventListener("click", () => setView("changes"));
+
+/* -------------------------------------------------------------- comments */
+const commentBtn = document.getElementById("comment-btn");
+const form = document.getElementById("comment-form");
+let pendingAnchor = null;
+
+function hideCommentBtn() { commentBtn.style.display = "none"; }
+
+document.addEventListener("selectionchange", () => {
+  if (!editingEnabled || !clean.offsetParent) return hideCommentBtn();
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !clean.contains(sel.anchorNode)) return hideCommentBtn();
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect.width && !rect.height) return hideCommentBtn();
+  commentBtn.style.display = "block";
+  commentBtn.style.top = (window.scrollY + rect.top - 34) + "px";
+  commentBtn.style.left = (window.scrollX + Math.min(rect.right,
+    window.innerWidth - 120)) + "px";
+});
+
+commentBtn.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const { text, map } = docTextAndMap(clean);
+  let start = pointOffset(range.startContainer, range.startOffset, clean, map, text);
+  let end = pointOffset(range.endContainer, range.endOffset, clean, map, text);
+  if (start === null || end === null || start === end) return;
+  if (start > end) { const t = start; start = end; end = t; }
+  // Trim whitespace off the selection edges so anchors are stable.
+  while (start < end && /\s/.test(text[start])) start += 1;
+  while (end > start && /\s/.test(text[end - 1])) end -= 1;
+  if (start === end) return;
+  const anchorText = text.slice(start, end);
+  let occurrence = 0; let from = 0;
+  while (true) {
+    const i = text.indexOf(anchorText, from);
+    if (i < 0 || i >= start) break;
+    occurrence += 1; from = i + 1;
+  }
+  pendingAnchor = { text: anchorText, occurrence,
+    before: text.slice(Math.max(0, start - 30), start),
+    after: text.slice(end, end + 30) };
+  document.getElementById("form-quote").textContent =
+    "On: “" + anchorText.slice(0, 80) + (anchorText.length > 80 ? "…" : "") + "”";
+  form.style.display = "block";
+  document.getElementById("form-body").value = "";
+  document.getElementById("form-body").focus();
+  hideCommentBtn();
+});
+
+document.getElementById("form-add").addEventListener("click", () => {
+  const body = document.getElementById("form-body").value.trim();
+  if (!body || !pendingAnchor) return;
+  outgoing.push({ id: `c${DATA.turn}-${commentSeq++}`, reply_to: null,
+    anchor: pendingAnchor, body });
+  pendingAnchor = null; form.style.display = "none";
+  renderThreads(); scheduleSave();
+});
+document.getElementById("form-cancel").addEventListener("click", () => {
+  pendingAnchor = null; form.style.display = "none";
+});
+
+function renderThreads() {
+  threadsEl.textContent = "";
+  const items = [];
+  for (const t of DATA.threads) {
+    items.push({ id: t.id, anchor: t.anchor,
+      messages: t.messages.concat(outgoing.filter((c) => c.reply_to === t.id)
+        .map((c) => ({ author: "you", body: c.body, outgoingId: c.id }))),
+      existing: true });
+  }
+  for (const c of outgoing.filter((c) => !c.reply_to)) {
+    items.push({ id: c.id, anchor: c.anchor,
+      messages: [{ author: "you", body: c.body, outgoingId: c.id }], existing: false });
+  }
+  if (!items.length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No comments yet. Select text in clean view to add one.";
+    threadsEl.appendChild(d);
+    return;
+  }
+  for (const t of items) {
+    const div = document.createElement("div");
+    div.className = "thread";
+    const located = locateAnchor(t.anchor, clean);
+    if (!located) {
+      const o = document.createElement("span");
+      o.className = "orphan";
+      o.textContent = "anchor changed — was: “" + t.anchor.text.slice(0, 50) + "”";
+      div.appendChild(o);
+    } else {
+      const q = document.createElement("div");
+      q.className = "anchor-quote";
+      q.textContent = "“" + t.anchor.text.slice(0, 60) +
+        (t.anchor.text.length > 60 ? "…" : "") + "”";
+      q.title = "Click to locate in the document";
+      q.addEventListener("click", () => selectAnchor(t.anchor));
+      div.appendChild(q);
+    }
+    for (const m of t.messages) {
+      const p = document.createElement("p");
+      p.className = "msg" + (m.author === "agent" ? " agent" : "");
+      const a = document.createElement("span");
+      a.className = "author"; a.textContent = m.author + ": ";
+      p.appendChild(a);
+      p.appendChild(document.createTextNode(m.body));
+      if (m.outgoingId) {
+        const x = document.createElement("button");
+        x.className = "remove-comment"; x.textContent = "✕";
+        x.title = "Remove (not sent yet)";
+        x.addEventListener("click", () => {
+          outgoing = outgoing.filter((c) => c.id !== m.outgoingId &&
+            c.reply_to !== m.outgoingId);
+          renderThreads(); scheduleSave();
+        });
+        p.appendChild(x);
+      }
+      div.appendChild(p);
+    }
+    if (editingEnabled && t.existing) {
+      const row = document.createElement("div"); row.className = "reply-row";
+      const ta = document.createElement("textarea");
+      ta.rows = 1; ta.placeholder = "Reply…";
+      const b = document.createElement("button"); b.textContent = "Reply";
+      b.addEventListener("click", () => {
+        const body = ta.value.trim();
+        if (!body) return;
+        outgoing.push({ id: `c${DATA.turn}-${commentSeq++}`, reply_to: t.id, body });
+        renderThreads(); scheduleSave();
+      });
+      row.appendChild(ta); row.appendChild(b); div.appendChild(row);
+    }
+    threadsEl.appendChild(div);
+  }
+}
+
+function selectAnchor(anchor) {
+  const located = locateAnchor(anchor, clean);
+  if (!located) return;
+  const { idx, map } = located;
+  const end = idx + anchor.text.length;
+  const range = document.createRange();
+  let startSet = false;
+  for (const e of map) {
+    const len = e.node.nodeValue.length;
+    if (!startSet && idx < e.start + len) {
+      range.setStart(e.node, Math.max(0, idx - e.start)); startSet = true;
+    }
+    if (startSet && end <= e.start + len) {
+      range.setEnd(e.node, Math.max(0, end - e.start));
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      e.node.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+  }
+}
+
+renderThreads();
+
+/* ------------------------------------------------------------ send review */
+const modal = document.getElementById("send-modal");
+const statusEl = document.getElementById("send-status");
+let blobJson = "";
+
+document.getElementById("send-btn").addEventListener("click", () => {
+  const doc = serialize(clean);
+  blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc), doc,
+    comments: outgoing });
+  document.getElementById("send-blob").value = blobJson;
+  statusEl.textContent = "";
+  modal.style.display = "block";
+});
+document.getElementById("close-modal").addEventListener("click", () => {
+  modal.style.display = "none";
+});
+
+document.getElementById("copy-btn").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(blobJson);
+    statusEl.textContent = "Copied — paste it into the chat.";
+  } catch (e) {
+    // Clipboard blocked in this sandbox: promote the fallback (verification 1).
+    document.getElementById("copy-btn").textContent = "Clipboard unavailable";
+    document.getElementById("copy-btn").disabled = true;
+    statusEl.textContent = "Clipboard is blocked here — select the text above and " +
+      "copy it manually, or download the file.";
+    const ta = document.getElementById("send-blob");
+    ta.focus(); ta.select();
+  }
+});
+
+document.getElementById("download-btn").addEventListener("click", () => {
+  try {
+    const blob = new Blob([blobJson], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `review-turn-${DATA.turn}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    statusEl.textContent = "Download started — send the file back in chat.";
+  } catch (e) {
+    statusEl.textContent = "Download failed here — select the text above and copy manually.";
+  }
+});
+</script>
