@@ -72,6 +72,11 @@ def test_block_diff_shapes():
     assert ["del", "beta "] in chg and ["ins", "BETA "] in chg
 
 
+def test_word_ops_ignore_rewrap_churn():
+    ops = loop.word_ops("one two\nthree four", "one two three four")
+    assert [op for op, _ in ops] == ["eq"]
+
+
 def test_block_diff_lists_never_word_merge():
     d = loop.block_diff("- a\n- b\n", "- a\n- c\n")
     assert [p["t"] for p in d] == ["del", "ins"]

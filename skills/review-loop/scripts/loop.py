@@ -148,6 +148,10 @@ def word_tokens(text):
 
 def word_ops(old, new):
     a, b = word_tokens(old), word_tokens(new)
+    # Compare words without their attached whitespace, so a soft-wrap or
+    # respace never reads as an edit; equal runs render the new side's text.
+    ka = [t.strip() for t in a]
+    kb = [t.strip() for t in b]
     ops = []
 
     def push(op, text):
@@ -158,9 +162,9 @@ def word_ops(old, new):
         else:
             ops.append([op, text])
 
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b).get_opcodes():
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kb).get_opcodes():
         if tag == "equal":
-            push("eq", "".join(a[i1:i2]))
+            push("eq", "".join(b[j1:j2]))
         else:
             push("del", "".join(a[i1:i2]))
             push("ins", "".join(b[j1:j2]))
