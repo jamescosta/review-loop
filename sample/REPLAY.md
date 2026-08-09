@@ -16,7 +16,7 @@ Edit `replay-run/doc.md` (the proof run changed the lease step, the lumber
 line, and the closing paragraph), then:
 
 ```
-python skills/review-loop/scripts/loop.py agent-commit replay-run --summary "What changed and why" --questions "A question for the reviewer"
+python skills/review-loop/scripts/loop.py agent-commit replay-run --summary "What changed and why"
 python skills/review-loop/scripts/loop.py build-artifact replay-run
 ```
 
@@ -64,5 +64,5 @@ Proof Reviewer     | Import doc.md into review loop
 
 plus `Turn 2 (agent)` on top after the reply pass. The turn 2 artifact
 shows the reviewer's comment with the agent's reply threaded beneath it,
-flagged "anchor changed — was: 'clerk'" because turn 2's edit removed the
-anchored word.
+flagged "commented text was edited away — was: 'clerk'" because turn 2's
+edit removed the anchored word.

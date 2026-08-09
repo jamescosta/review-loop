@@ -29,10 +29,11 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
 
 1. **Edit the document file** per the ask. Keep to the rendered markdown
    subset: headings, bold/italic, lists, links, code.
-2. Commit the pass and stamp it as the current turn's base:
+2. Commit the pass and stamp it as the current turn's base — the summary
+   becomes the commit message:
 
    ```
-   python SCRIPTS/loop.py agent-commit PROJECT --summary "One-paragraph summary of what changed and why" --questions "First question for the reviewer" --questions "Second question"
+   python SCRIPTS/loop.py agent-commit PROJECT --summary "One-paragraph summary of what changed and why"
    ```
 
 3. Build and publish the artifact:
@@ -46,8 +47,10 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
    unchanged across turns). The first publish: record the URL in
    `PROJECT/.review/artifact-url.txt`. In a later session, pass that URL as
    the Artifact tool's `url` parameter so the redeploy targets the same page.
-4. Tell the reviewer the artifact URL and the turn number. If a tab was
-   already open, they must refresh — the page banner says so too.
+4. Tell the reviewer the artifact URL and the turn number, and give the
+   turn's summary and your questions **in chat** — the page deliberately
+   carries neither. If a tab was already open, they must refresh (the page's
+   Refresh button does it).
 
 **One live surface.** The published URL is the loop's identity, and the
 reviewer only ever sees the page through it. Never show `.review/artifact.html`

@@ -13,6 +13,8 @@ LOOP = str(SCRIPTS / "loop.py")
 
 
 def write_lf(path, text):
+    # Deliberately independent of loop.write_text: fixtures must not depend
+    # on the code under test.
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
@@ -105,6 +107,22 @@ def make_blob(doc, turn, **overrides):
     return blob
 
 
+def turn_base(project):
+    return (project / ".review" / "base.md").read_text(encoding="utf-8")
+
+
+def apply_blob(project, tmp_path, blob, reviewer="Test Reviewer"):
+    bf = tmp_path / "blob.json"
+    write_lf(bf, json.dumps(blob))
+    return run(["apply", project, "--blob", bf, "--reviewer", reviewer])
+
+
+def raw_payload(project):
+    html = (project / ".review" / "artifact.html").read_text(encoding="utf-8")
+    return html.split('<script id="rl-data" type="application/json">')[1] \
+               .split("</script>")[0]
+
+
 @pytest.fixture()
 def project(tmp_path):
     src = tmp_path / "doc.md"
@@ -114,8 +132,7 @@ def project(tmp_path):
     assert r.returncode == 0, r.stderr
     doc = proj / "doc.md"
     write_lf(doc, "# Sample\n\nfirst paragraph, improved\n")
-    r = run(["agent-commit", proj, "--summary", "Improved the paragraph",
-             "--questions", "Is it better?"])
+    r = run(["agent-commit", proj, "--summary", "Improved the paragraph"])
     assert r.returncode == 0, r.stderr
     return proj
 
@@ -134,28 +151,21 @@ def test_build_artifact_embeds_escaped_data(project):
     assert r.returncode == 0, r.stderr
     html = (project / ".review" / "artifact.html").read_text(encoding="utf-8")
     assert "__REVIEW_LOOP_DATA__" not in html and "__DOC_TITLE__" not in html
-    payload = html.split('<script id="rl-data" type="application/json">')[1]
-    payload = payload.split("</script>")[0]
+    payload = raw_payload(project)
     assert "<" not in payload  # embedding safety: `<` always escaped
     data = json.loads(payload)
     assert data["turn"] == 1 and data["checksum"] == loop.fnv1a(data["baseDoc"])
 
 
 def test_apply_rejects_stale_turn(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=7)
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r = apply_blob(project, tmp_path, make_blob(turn_base(project), turn=7))
     assert r.returncode == 2
     assert "built on turn 7, current is 1" in r.stderr
     assert "refresh the artifact" in r.stderr
 
 
 def test_apply_rejects_truncated_blob(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1)
-    raw = json.dumps(blob)
+    raw = json.dumps(make_blob(turn_base(project), turn=1))
     bf = tmp_path / "blob.json"
     write_lf(bf, raw[: len(raw) // 2])  # cut mid-JSON
     r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
@@ -164,22 +174,16 @@ def test_apply_rejects_truncated_blob(project, tmp_path):
 
 
 def test_apply_rejects_checksum_mismatch(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1, checksum="deadbeef")
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r = apply_blob(project, tmp_path,
+                   make_blob(turn_base(project), turn=1, checksum="deadbeef"))
     assert r.returncode == 2
     assert "checksum" in r.stderr
 
 
 def test_apply_rejects_mid_turn_file_collision(project, tmp_path):
+    base = turn_base(project)
     write_lf(project / "doc.md", "# Sample\n\nchanged outside the loop\n")
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1)
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r = apply_blob(project, tmp_path, make_blob(base, turn=1))
     assert r.returncode == 2
     assert "changed outside the loop" in r.stderr
     assert "nothing was applied" in r.stderr
@@ -189,16 +193,13 @@ def test_apply_rejects_mid_turn_file_collision(project, tmp_path):
 
 
 def test_apply_happy_path_then_already_applied(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    edited = base.replace("improved", "improved and edited by the human")
+    edited = turn_base(project).replace("improved", "improved and edited by the human")
     blob = make_blob(edited, turn=1, comments=[
         {"id": "c1-1", "reply_to": None,
          "anchor": {"text": "first paragraph", "occurrence": 0,
                     "before": "", "after": ", improved"},
          "body": "Why this wording?"}])
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r = apply_blob(project, tmp_path, blob)
     assert r.returncode == 0, r.stderr
     assert "edited by the human" in (project / "doc.md").read_text(encoding="utf-8")
     log = subprocess.run(["git", "-C", str(project), "log", "-1", "--format=%an|%ae|%s"],
@@ -208,7 +209,7 @@ def test_apply_happy_path_then_already_applied(project, tmp_path):
     assert threads[0]["id"] == "c1-1" and threads[0]["pending_reply"] is True
 
     # Re-sending the same blob is refused.
-    r2 = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r2 = apply_blob(project, tmp_path, blob)
     assert r2.returncode == 2
     assert "already applied" in r2.stderr and "re-send is refused" in r2.stderr
 
@@ -222,24 +223,18 @@ def test_apply_happy_path_then_already_applied(project, tmp_path):
 
 def test_resolve_flow(project, tmp_path):
     # Turn 1: a comment creates thread c1-1.
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1, comments=[
+    blob = make_blob(turn_base(project), turn=1, comments=[
         {"id": "c1-1", "reply_to": None,
          "anchor": {"text": "first paragraph", "occurrence": 0,
                     "before": "", "after": ", improved"},
          "body": "A question"}])
-    bf = tmp_path / "b1.json"
-    write_lf(bf, json.dumps(blob))
-    assert run(["apply", project, "--blob", bf, "--reviewer", "R"]).returncode == 0
+    assert apply_blob(project, tmp_path, blob).returncode == 0
 
     # Turn 2: the reviewer resolves it.
     r = run(["agent-commit", project, "--summary", "next pass"])
     assert r.returncode == 0, r.stderr
-    base2 = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob2 = make_blob(base2, turn=2, resolved=["c1-1"])
-    bf2 = tmp_path / "b2.json"
-    write_lf(bf2, json.dumps(blob2))
-    r = run(["apply", project, "--blob", bf2, "--reviewer", "R"])
+    r = apply_blob(project, tmp_path,
+                   make_blob(turn_base(project), turn=2, resolved=["c1-1"]))
     assert r.returncode == 0, r.stderr
     assert "Resolved thread(s): c1-1" in r.stdout
     threads = json.loads((project / ".review" / "comments.json").read_text())["threads"]
@@ -248,27 +243,20 @@ def test_resolve_flow(project, tmp_path):
     # Resolved threads leave the next turn's artifact data.
     run(["agent-commit", project, "--summary", "turn 3"])
     assert run(["build-artifact", project]).returncode == 0
-    html = (project / ".review" / "artifact.html").read_text(encoding="utf-8")
-    payload = html.split('<script id="rl-data" type="application/json">')[1].split("</script>")[0]
-    assert json.loads(payload)["threads"] == []
+    assert json.loads(raw_payload(project))["threads"] == []
 
 
 def test_build_artifact_refuses_applied_turn(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    bf = tmp_path / "b.json"
-    write_lf(bf, json.dumps(make_blob(base, turn=1)))
-    assert run(["apply", project, "--blob", bf, "--reviewer", "R"]).returncode == 0
+    assert apply_blob(project, tmp_path,
+                      make_blob(turn_base(project), turn=1)).returncode == 0
     r = run(["build-artifact", project])
     assert r.returncode == 2
     assert "already applied" in r.stderr and "agent-commit" in r.stderr
 
 
 def test_apply_rejects_unknown_resolve_id(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1, resolved=["no-such-thread"])
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "R"])
+    r = apply_blob(project, tmp_path,
+                   make_blob(turn_base(project), turn=1, resolved=["no-such-thread"]))
     assert r.returncode == 2
     assert "unknown thread" in r.stderr
     state = json.loads((project / ".review" / "state.json").read_text())
@@ -276,12 +264,9 @@ def test_apply_rejects_unknown_resolve_id(project, tmp_path):
 
 
 def test_apply_rejects_malformed_comment_without_mutating(project, tmp_path):
-    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
-    blob = make_blob(base, turn=1, comments=[
+    blob = make_blob(turn_base(project), turn=1, comments=[
         {"id": "c1-1", "reply_to": "no-such-thread", "body": "hello"}])
-    bf = tmp_path / "blob.json"
-    write_lf(bf, json.dumps(blob))
-    r = run(["apply", project, "--blob", bf, "--reviewer", "Test Reviewer"])
+    r = apply_blob(project, tmp_path, blob)
     assert r.returncode == 2
     assert "unknown thread" in r.stderr
     state = json.loads((project / ".review" / "state.json").read_text())

@@ -13,6 +13,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from html import escape
 from pathlib import Path
 
 AGENT_NAME = "Review-loop agent"
@@ -31,6 +32,15 @@ def read_text(path):
 def write_text(path, text):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+
+
+def to_lf(text):
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text if text.endswith("\n") else text + "\n"
+
+
+def write_json(path, obj):
+    write_text(path, json.dumps(obj, indent=2, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------- checksum
@@ -193,13 +203,15 @@ def block_diff(old_doc, new_doc):
             k = 0
             while k < min(len(olds), len(news)):
                 o, n = olds[k], news[k]
-                if (block_kind(o) == block_kind(n)
-                        and block_kind(o) in ("heading", "para")
-                        and SequenceMatcher(None, normalize(o), normalize(n)).ratio() > 0.5):
-                    diff.append({"t": "chg", "ops": word_ops(o, n)})
-                else:
-                    diff.append({"t": "del", "md": o})
-                    diff.append({"t": "ins", "md": n})
+                kind = block_kind(o)
+                if kind == block_kind(n) and kind in ("heading", "para"):
+                    sm = SequenceMatcher(None, on[i1 + k], nn[j1 + k])
+                    if sm.quick_ratio() > 0.5 and sm.ratio() > 0.5:
+                        diff.append({"t": "chg", "ops": word_ops(o, n)})
+                        k += 1
+                        continue
+                diff.append({"t": "del", "md": o})
+                diff.append({"t": "ins", "md": n})
                 k += 1
             diff += [{"t": "del", "md": x} for x in olds[k:]]
             diff += [{"t": "ins", "md": x} for x in news[k:]]
@@ -243,7 +255,7 @@ def load_state(project):
 
 
 def save_state(project, state):
-    write_text(review_dir(project) / "state.json", json.dumps(state, indent=2) + "\n")
+    write_json(review_dir(project) / "state.json", state)
 
 
 def load_threads(project):
@@ -254,8 +266,11 @@ def load_threads(project):
 
 
 def save_threads(project, threads):
-    write_text(review_dir(project) / "comments.json",
-               json.dumps({"threads": threads}, indent=2, ensure_ascii=False) + "\n")
+    write_json(review_dir(project) / "comments.json", {"threads": threads})
+
+
+def find_thread(threads, tid):
+    return next((t for t in threads if t["id"] == tid), None)
 
 
 def doc_path(project, state):
@@ -289,10 +304,7 @@ def cmd_init(args):
     if not src.exists():
         fail(f"document {src} does not exist")
     doc_name = src.name
-    content = read_text(src).replace("\r\n", "\n").replace("\r", "\n")
-    if not content.endswith("\n"):
-        content += "\n"
-    write_text(project / doc_name, content)
+    write_text(project / doc_name, to_lf(read_text(src)))
 
     if not (project / ".git").exists():
         git(project, "init", "-b", "main")
@@ -316,9 +328,7 @@ def cmd_agent_commit(args):
     state = load_state(project)
     doc = doc_path(project, state)
 
-    content = read_text(doc).replace("\r\n", "\n").replace("\r", "\n")
-    if not content.endswith("\n"):
-        content += "\n"
+    content = to_lf(read_text(doc))
     write_text(doc, content)
 
     prev = git(project, "show", f"HEAD:{state['doc']}")
@@ -333,16 +343,13 @@ def cmd_agent_commit(args):
         f"Turn {turn} (agent): {args.summary}", ident=ident)
 
     rd = review_dir(project)
+    checksum = fnv1a(content)
     write_text(rd / "base.md", content)
-    write_text(rd / "diff.json",
-               json.dumps(block_diff(prev, content), ensure_ascii=False) + "\n")
-    write_text(rd / "turn.json", json.dumps(
-        {"turn": turn, "summary": args.summary, "questions": args.questions or []},
-        indent=2, ensure_ascii=False) + "\n")
+    write_json(rd / "diff.json", block_diff(prev, content))
     save_state(project, {"turn": turn, "applied": False, "doc": state["doc"],
-                         "base_checksum": fnv1a(content)})
+                         "base_checksum": checksum})
     print(f"Turn {turn} committed and staged as the current base "
-          f"(checksum {fnv1a(content)}).")
+          f"(checksum {checksum}).")
     print("Next: build-artifact, then publish .review/artifact.html.")
 
 
@@ -356,13 +363,10 @@ def cmd_build_artifact(args):
              "show a closed turn that rejects every review sent from it. Take the "
              "next agent pass (agent-commit) first.")
     rd = review_dir(project)
-    meta = json.loads(read_text(rd / "turn.json"))
     data = {
         "docName": state["doc"],
         "builtAt": int(datetime.now(timezone.utc).timestamp() * 1000),
         "turn": state["turn"],
-        "summary": meta["summary"],
-        "questions": meta["questions"],
         "baseDoc": read_text(rd / "base.md"),
         "checksum": state["base_checksum"],
         "diff": json.loads(read_text(rd / "diff.json")),
@@ -372,7 +376,7 @@ def cmd_build_artifact(args):
     # Embedding safety: JSON in a data script tag with `<` escaped, so a doc
     # containing </script>, backticks, or quotes cannot break the page.
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
-    title = state["doc"].replace("&", "&amp;").replace("<", "&lt;")
+    title = escape(state["doc"])
     page = template.replace("__REVIEW_LOOP_DATA__", payload).replace("__DOC_TITLE__", title)
     out = rd / "artifact.html"
     write_text(out, page)
@@ -437,14 +441,18 @@ def cmd_apply(args):
                 fail(f"comment {c.get('id')} replies to unknown thread "
                      f"{c['reply_to']} — blob malformed; send again.")
         else:
+            if c.get("id") in known:
+                fail(f"comment id {c.get('id')} collides with an existing thread — "
+                     "blob malformed; send again.")
             a = c.get("anchor") or {}
             if not all(k in a for k in ("text", "occurrence", "before", "after")):
                 fail(f"comment {c.get('id')} has an incomplete anchor — blob "
                      "malformed; send again.")
 
-    # All guards passed: apply the human turn.
+    # All guards passed: apply the human turn. Any non-equal opcode in the
+    # reconstruction means a normalized difference, so the stats are the verdict.
     result, stats = reconstruct(base, blob["doc"])
-    edited = normalize(result) != normalize(base)
+    edited = any(stats.values())
     ident = reviewer_ident(args.reviewer)
     if edited:
         write_text(doc_path(project, state), result)
@@ -454,28 +462,26 @@ def cmd_apply(args):
     git(project, "commit", "--allow-empty", "-m",
         f"Turn {state['turn']} (review): {detail}", ident=ident)
 
-    new_threads = []
     for c in blob["comments"]:
         if c.get("reply_to"):
-            t = next(t for t in threads if t["id"] == c["reply_to"])
+            t = find_thread(threads, c["reply_to"])
             t["messages"].append({"author": args.reviewer, "body": c["body"]})
             t["pending_reply"] = True
         else:
             threads.append({"id": c["id"], "anchor": c["anchor"], "pending_reply": True,
                             "messages": [{"author": args.reviewer, "body": c["body"]}]})
-            new_threads.append(c["id"])
     for rid in resolved_ids:
-        t = next(t for t in threads if t["id"] == rid)
+        t = find_thread(threads, rid)
         t["resolved"] = True
         t["pending_reply"] = False
     save_threads(project, threads)
 
     state["applied"] = True
     save_state(project, state)
-    write_text(rd / "applied.json", json.dumps(
-        {"turn": state["turn"], "reviewer": args.reviewer,
-         "applied_at": datetime.now(timezone.utc).isoformat(),
-         "blob_checksum": blob["checksum"]}, indent=2) + "\n")
+    write_json(rd / "applied.json",
+               {"turn": state["turn"], "reviewer": args.reviewer,
+                "applied_at": datetime.now(timezone.utc).isoformat(),
+                "blob_checksum": blob["checksum"]})
 
     print(f"Applied turn {state['turn']} review from {args.reviewer}: {detail}.")
     if resolved_ids:
@@ -495,7 +501,7 @@ def cmd_reply(args):
     project = Path(args.project)
     load_state(project)
     threads = load_threads(project)
-    t = next((t for t in threads if t["id"] == args.thread), None)
+    t = find_thread(threads, args.thread)
     if t is None:
         fail(f"unknown thread {args.thread} — known: "
              f"{', '.join(x['id'] for x in threads) or '(none)'}")
@@ -529,7 +535,6 @@ def main():
     s = sub.add_parser("agent-commit", help="commit the agent pass and stamp the turn base")
     s.add_argument("project")
     s.add_argument("--summary", required=True)
-    s.add_argument("--questions", action="append")
     s.set_defaults(fn=cmd_agent_commit)
 
     s = sub.add_parser("build-artifact", help="generate .review/artifact.html for the current turn")

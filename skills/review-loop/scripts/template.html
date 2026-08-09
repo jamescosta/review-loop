@@ -1,5 +1,8 @@
 <title>Review loop — __DOC_TITLE__</title>
 <style>
+  /* Palette appears four times by design: the artifact viewer stamps
+     data-theme on the root at runtime, and its toggle must override the
+     media query in both directions. Keep all four blocks in sync. */
   :root {
     --bg: #fafbfc; --panel: #f1f3f6; --fg: #1c2430; --muted: #5c6773;
     --border: #d5dae1; --accent: #3556c7; --accent-fg: #ffffff;
@@ -89,7 +92,7 @@
     cursor: pointer; }
   .anchor-quote:hover { color: var(--accent); }
   .orphan { color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px;
-    padding: .1rem .4rem; font-size: .78rem; display: inline-block; margin-bottom: .2rem; }
+    padding: .1rem .4rem; font-size: .78rem; margin-bottom: .2rem; }
   .msg { margin: .55rem 0 0; }
   .msg-head { display: flex; align-items: center; gap: .45rem; }
   .avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--border);
@@ -109,7 +112,7 @@
     color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
     padding: .4rem; margin-top: .4rem; }
   .thread .reply-row { display: flex; gap: .4rem; margin-top: .3rem; }
-  .remove-comment { float: right; font-size: .7rem; padding: .05rem .35rem; }
+  .remove-comment { margin-left: auto; font-size: .7rem; padding: .05rem .35rem; }
   #comment-btn { position: absolute; z-index: 20; display: none;
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
     font-size: .78rem; padding: .2rem .55rem; }
@@ -201,6 +204,7 @@ function fnv1a(str) {
 /* ------------------------------------------------------ markdown block model
    splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
    drift, the round-trip self-check reports false mismatches. */
+const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
 
 function splitBlocks(doc) {
@@ -213,7 +217,7 @@ function splitBlocks(doc) {
     }
     if (fence) {
       cur.push(ln);
-      if (stripped.startsWith("```") && cur.length > 1) {
+      if (stripped.startsWith("```")) {
         fence = false; blocks.push(cur.join("\n")); cur = [];
       }
       continue;
@@ -236,8 +240,28 @@ function blockKind(block) {
 
 const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
 
+function parseListItems(lines) {
+  // The first line always carries a marker — that is what made the block a
+  // list; later marker-less lines are soft-wrap continuations of their item.
+  const items = [];
+  for (const l of lines) {
+    const m = LIST_LINE.exec(l);
+    if (m) {
+      items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
+        text: l.slice(m[0].length) });
+    } else if (items.length) {
+      items[items.length - 1].text += " " + l.trim();
+    }
+  }
+  return items;
+}
+
+function quoted(text, n) {
+  return "“" + text.slice(0, n) + (text.length > n ? "…" : "") + "”";
+}
+
 function normalize(doc) {
-  doc = doc.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/ /g, " ");
+  doc = doc.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(NBSP_RE, " ");
   const out = [];
   for (const b of splitBlocks(doc)) {
     const kind = blockKind(b);
@@ -249,20 +273,9 @@ function normalize(doc) {
       const rest = collapse(lines.slice(1).join(" "));
       if (rest) out.push(rest);
     } else if (kind === "list") {
-      const items = [];
-      for (const l of lines) {
-        const c = collapse(l);
-        if (!c) continue;
-        const m = LIST_LINE.exec(l);
-        if (m) {
-          const level = Math.floor(m[1].length / 2);
-          const marker = /^\d/.test(m[2]) ? "1." : "-";
-          items.push(("  ".repeat(level) + marker + " " + collapse(l.slice(m[0].length))).trimEnd());
-        } else if (items.length) {
-          items[items.length - 1] += " " + c;
-        } else items.push(c);
-      }
-      out.push(items.join("\n"));
+      out.push(parseListItems(lines).map((it) =>
+        ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
+          collapse(it.text)).trimEnd()).join("\n"));
     } else {
       out.push(collapse(lines.join(" ")));
     }
@@ -311,15 +324,7 @@ function renderBlock(block, container) {
     const rest = lines.slice(1).join(" ").trim();
     if (rest) { const p = document.createElement("p"); renderInline(rest, p); container.appendChild(p); }
   } else if (kind === "list") {
-    const items = [];
-    for (const l of lines) {
-      const m = LIST_LINE.exec(l);
-      if (m) {
-        items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
-          text: l.slice(m[0].length) });
-      } else if (items.length) items[items.length - 1].text += " " + l.trim();
-      else items.push({ level: 0, ordered: false, text: l.trim() });
-    }
+    const items = parseListItems(lines);
     const stack = [];
     for (const item of items) {
       while (stack.length && stack[stack.length - 1].level > item.level) stack.pop();
@@ -355,10 +360,10 @@ function renderMarkdown(md, container) {
    The single serializer: editable DOM back to markdown, covering exactly
    the rendered subset. Inverse of the renderer over that subset. */
 const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
-  "UL", "OL", "PRE", "BLOCKQUOTE"]);
+  "UL", "OL", "PRE"]);
 
 function serializeInline(node) {
-  if (node.nodeType === 3) return node.nodeValue.replace(/ /g, " ");
+  if (node.nodeType === 3) return node.nodeValue.replace(NBSP_RE, " ");
   if (node.nodeType !== 1) return "";
   const tag = node.tagName;
   if (tag === "BR") return "\n";
@@ -495,10 +500,10 @@ function docTextAndMap(root) {
       }
     }
   })(root);
-  return { text: text.replace(/ /g, " "), map };
+  return { text: text.replace(NBSP_RE, " "), map };
 }
 
-function pointOffset(container, offset, root, map, text) {
+function pointOffset(container, offset, map, text) {
   if (container.nodeType === 3) {
     const entry = map.find((e) => e.node === container);
     return entry ? entry.start + offset : null;
@@ -513,15 +518,27 @@ function pointOffset(container, offset, root, map, text) {
   return offset === 0 ? 0 : text.length;
 }
 
-function locateAnchor(anchor, root) {
-  const { text, map } = docTextAndMap(root);
+function locateAnchor(anchor, root, ctx) {
+  if (!ctx) ctx = docTextAndMap(root);
   let idx = -1; let from = 0;
   for (let k = 0; k <= anchor.occurrence; k += 1) {
-    idx = text.indexOf(anchor.text, from);
+    idx = ctx.text.indexOf(anchor.text, from);
     if (idx < 0) return null;
     from = idx + 1;
   }
-  return { idx, map, text };
+  return { idx, map: ctx.map };
+}
+
+function segmentsFor(map, from, to) {
+  // Per-text-node slices of the document range [from, to).
+  const segs = [];
+  for (const e of map) {
+    const len = e.node.nodeValue.length;
+    const s = Math.max(from, e.start);
+    const t = Math.min(to, e.start + len);
+    if (s < t) segs.push({ node: e.node, from: s - e.start, to: t - e.start });
+  }
+  return segs;
 }
 
 /* ---------------------------------------------------------------- app */
@@ -540,7 +557,6 @@ for (const t of DATA.threads) {
     commentSeq = Math.max(commentSeq, Number(m[2]) + 1);
   }
 }
-let editingEnabled = true;
 let storageOK = false;
 const storageKey = `rl-${DATA.checksum}-${DATA.turn}`;
 
@@ -576,12 +592,11 @@ if (fnv1a(DATA.baseDoc) !== DATA.checksum) {
     "This turn will not be used.");
 }
 if (!selfCheckOK) {
-  editingEnabled = false;
   clean.setAttribute("contenteditable", "false");
   document.getElementById("send-btn").disabled = true;
 }
 
-buildChangesView(document.getElementById("changes-body"));
+let changesBuilt = false;  // the changes view builds lazily on first open
 
 /* Autosave probe (build-day-one verification 2): if storage doesn't survive
    the sandbox, the page carries the persistent unsent-edits notice. */
@@ -589,7 +604,7 @@ try {
   localStorage.setItem("rl-probe", "1");
   localStorage.removeItem("rl-probe");
   storageOK = true;
-} catch (e) { storageOK = false; }
+} catch (e) { /* storage unavailable — the notice below says so */ }
 if (!storageOK) {
   notice("warn", "Unsent edits are lost if you close this tab — send your review " +
     "before closing.");
@@ -601,7 +616,7 @@ if (!storageOK) {
       renderMarkdown(draft.doc, clean);
       outgoing = draft.outgoing || [];
       resolvedLocal = draft.resolved || [];
-      commentSeq = draft.seq || outgoing.length + 1;
+      if (draft.seq) commentSeq = Math.max(commentSeq, draft.seq);
       const n = notice("warn", "Restored unsent edits from an earlier visit. ");
       const btn = document.createElement("button");
       btn.textContent = "Discard restored edits";
@@ -641,6 +656,10 @@ clean.addEventListener("paste", (e) => {
 const btnClean = document.getElementById("view-clean");
 const btnChanges = document.getElementById("view-changes");
 function setView(which) {
+  if (which === "changes" && !changesBuilt) {
+    buildChangesView(document.getElementById("changes-body"));
+    changesBuilt = true;
+  }
   clean.hidden = which !== "clean";
   changesEl.hidden = which !== "changes";
   btnClean.setAttribute("aria-pressed", String(which === "clean"));
@@ -655,12 +674,16 @@ const commentBtn = document.getElementById("comment-btn");
 const form = document.getElementById("comment-form");
 let pendingAnchor = null;
 
-function hideCommentBtn() { commentBtn.style.display = "none"; }
+function hideCommentBtn() {
+  if (commentBtn.style.display === "block") commentBtn.style.display = "none";
+}
 
 document.addEventListener("selectionchange", () => {
-  if (!editingEnabled || !clean.offsetParent) return hideCommentBtn();
+  // Cheap checks first: this fires on every caret move while typing, and
+  // offsetParent forces layout.
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !clean.contains(sel.anchorNode)) return hideCommentBtn();
+  if (!sel || sel.isCollapsed || !selfCheckOK ||
+      !clean.contains(sel.anchorNode) || !clean.offsetParent) return hideCommentBtn();
   const rect = sel.getRangeAt(0).getBoundingClientRect();
   if (!rect.width && !rect.height) return hideCommentBtn();
   commentBtn.style.display = "block";
@@ -675,8 +698,8 @@ commentBtn.addEventListener("mousedown", (e) => {
   if (!sel || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
   const { text, map } = docTextAndMap(clean);
-  let start = pointOffset(range.startContainer, range.startOffset, clean, map, text);
-  let end = pointOffset(range.endContainer, range.endOffset, clean, map, text);
+  let start = pointOffset(range.startContainer, range.startOffset, map, text);
+  let end = pointOffset(range.endContainer, range.endOffset, map, text);
   if (start === null || end === null || start === end) return;
   if (start > end) { const t = start; start = end; end = t; }
   // Trim whitespace off the selection edges so anchors are stable.
@@ -694,7 +717,7 @@ commentBtn.addEventListener("mousedown", (e) => {
     before: text.slice(Math.max(0, start - 30), start),
     after: text.slice(end, end + 30) };
   document.getElementById("form-quote").textContent =
-    "On: “" + anchorText.slice(0, 80) + (anchorText.length > 80 ? "…" : "") + "”";
+    "On: " + quoted(anchorText, 80);
   form.style.display = "block";
   document.getElementById("form-body").value = "";
   document.getElementById("form-body").focus();
@@ -717,35 +740,14 @@ document.getElementById("form-cancel").addEventListener("click", () => {
    serializer recurses through unknown inline elements, so marks never reach
    the markdown. */
 function clearHighlights() {
+  const parents = new Set();
   for (const m of Array.from(clean.querySelectorAll("mark.rl-hl"))) {
     const parent = m.parentNode;
     while (m.firstChild) parent.insertBefore(m.firstChild, m);
     parent.removeChild(m);
-    parent.normalize();
+    parents.add(parent);
   }
-}
-
-function applyHighlight(anchor, threadId) {
-  const located = locateAnchor(anchor, clean);
-  if (!located) return;
-  const { idx, map } = located;
-  const end = idx + anchor.text.length;
-  const segments = [];
-  for (const e of map) {
-    const len = e.node.nodeValue.length;
-    const s = Math.max(idx, e.start);
-    const t = Math.min(end, e.start + len);
-    if (s < t) segments.push({ node: e.node, from: s - e.start, to: t - e.start });
-  }
-  for (const seg of segments) {
-    const r = document.createRange();
-    r.setStart(seg.node, seg.from);
-    r.setEnd(seg.node, seg.to);
-    const mark = document.createElement("mark");
-    mark.className = "rl-hl";
-    mark.dataset.thread = threadId;
-    try { r.surroundContents(mark); } catch (e) { /* partial node — skip */ }
-  }
+  for (const p of parents) p.normalize();
 }
 
 clean.addEventListener("click", (e) => {
@@ -761,6 +763,9 @@ clean.addEventListener("click", (e) => {
 function renderThreads() {
   threadsEl.textContent = "";
   clearHighlights();
+  // One document walk serves every anchor lookup and highlight this render.
+  const ctx = docTextAndMap(clean);
+  const hlSegs = [];
   const items = [];
   for (const t of DATA.threads) {
     items.push({ id: t.id, anchor: t.anchor,
@@ -789,8 +794,7 @@ function renderThreads() {
       line.className = "card-head";
       const s = document.createElement("span");
       s.className = "resolved-line";
-      s.textContent = "Resolved — “" + t.anchor.text.slice(0, 40) +
-        (t.anchor.text.length > 40 ? "…" : "") + "”";
+      s.textContent = "Resolved — " + quoted(t.anchor.text, 40);
       const u = document.createElement("button");
       u.className = "undo-btn"; u.textContent = "Undo";
       u.addEventListener("click", () => {
@@ -804,23 +808,26 @@ function renderThreads() {
     }
     const head = document.createElement("div");
     head.className = "card-head";
-    const located = locateAnchor(t.anchor, clean);
+    const located = locateAnchor(t.anchor, clean, ctx);
     if (!located) {
       const o = document.createElement("span");
       o.className = "orphan";
-      o.textContent = "commented text was edited away — was: “" +
-        t.anchor.text.slice(0, 50) + "”";
+      o.textContent = "commented text was edited away — was: " +
+        quoted(t.anchor.text, 50);
       head.appendChild(o);
     } else {
+      for (const s of segmentsFor(ctx.map, located.idx,
+          located.idx + t.anchor.text.length)) {
+        hlSegs.push({ node: s.node, from: s.from, to: s.to, thread: t.id });
+      }
       const q = document.createElement("div");
       q.className = "anchor-quote";
-      q.textContent = "“" + t.anchor.text.slice(0, 60) +
-        (t.anchor.text.length > 60 ? "…" : "") + "”";
+      q.textContent = quoted(t.anchor.text, 60);
       q.title = "Click to locate in the document";
       q.addEventListener("click", () => selectAnchor(t.anchor));
       head.appendChild(q);
     }
-    if (editingEnabled && t.existing) {
+    if (selfCheckOK && t.existing) {
       const r = document.createElement("button");
       r.className = "resolve-btn"; r.textContent = "Resolve";
       r.title = "Mark resolved — the thread leaves the next turn";
@@ -849,7 +856,6 @@ function renderThreads() {
         const x = document.createElement("button");
         x.className = "remove-comment"; x.textContent = "✕";
         x.title = "Remove (not sent yet)";
-        x.style.marginLeft = "auto";
         x.addEventListener("click", () => {
           outgoing = outgoing.filter((c) => c.id !== m.outgoingId &&
             c.reply_to !== m.outgoingId);
@@ -863,7 +869,7 @@ function renderThreads() {
       wrap.appendChild(mh); wrap.appendChild(body);
       div.appendChild(wrap);
     }
-    if (editingEnabled && t.existing) {
+    if (selfCheckOK && t.existing) {
       const row = document.createElement("div"); row.className = "reply-row";
       const ta = document.createElement("textarea");
       ta.rows = 1; ta.placeholder = "Reply…";
@@ -878,31 +884,37 @@ function renderThreads() {
     }
     threadsEl.appendChild(div);
   }
-  for (const t of items) {
-    if (!resolvedLocal.includes(t.id)) applyHighlight(t.anchor, t.id);
+  // Wrap highlights bottom-up: surroundContents splits its text node, so a
+  // later-offset wrap must land before an earlier one in the same node.
+  const nodeStart = new Map(ctx.map.map((e) => [e.node, e.start]));
+  hlSegs.sort((a, b) =>
+    (nodeStart.get(a.node) + a.from) - (nodeStart.get(b.node) + b.from));
+  for (let i = hlSegs.length - 1; i >= 0; i -= 1) {
+    const seg = hlSegs[i];
+    try {
+      const r = document.createRange();
+      r.setStart(seg.node, seg.from);
+      r.setEnd(seg.node, seg.to);
+      const mark = document.createElement("mark");
+      mark.className = "rl-hl";
+      mark.dataset.thread = seg.thread;
+      r.surroundContents(mark);
+    } catch (e) { /* overlapping selections — leave that slice unmarked */ }
   }
 }
 
 function selectAnchor(anchor) {
-  const located = locateAnchor(anchor, clean);
+  const ctx = docTextAndMap(clean);
+  const located = locateAnchor(anchor, clean, ctx);
   if (!located) return;
-  const { idx, map } = located;
-  const end = idx + anchor.text.length;
+  const segs = segmentsFor(ctx.map, located.idx, located.idx + anchor.text.length);
+  if (!segs.length) return;
   const range = document.createRange();
-  let startSet = false;
-  for (const e of map) {
-    const len = e.node.nodeValue.length;
-    if (!startSet && idx < e.start + len) {
-      range.setStart(e.node, Math.max(0, idx - e.start)); startSet = true;
-    }
-    if (startSet && end <= e.start + len) {
-      range.setEnd(e.node, Math.max(0, end - e.start));
-      const sel = window.getSelection();
-      sel.removeAllRanges(); sel.addRange(range);
-      e.node.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
-      return;
-    }
-  }
+  range.setStart(segs[0].node, segs[0].from);
+  range.setEnd(segs[segs.length - 1].node, segs[segs.length - 1].to);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+  segs[0].node.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 renderThreads();
@@ -912,27 +924,40 @@ const modal = document.getElementById("send-modal");
 const statusEl = document.getElementById("send-status");
 let blobJson = "";
 
-/* No dead controls: when the embedding blocks the clipboard API, drop the
-   Copy button and lead with select+copy. Checked two ways because neither
-   detector exists everywhere; the click handler is the last resort. */
-function disableCopyButton() {
-  document.getElementById("copy-btn").style.display = "none";
-  document.getElementById("send-hint").textContent = "The review below is already " +
-    "selected — press Ctrl+C to copy it and paste it into the chat, or download " +
-    "the file and drop it into the chat.";
+/* No dead controls: probe each return channel and drop the ones this
+   embedding blocks; the hint always describes only what remains. Probes are
+   best-effort (neither detector exists everywhere) — the click handlers stay
+   as the last resort. */
+const channels = { copy: true, download: true };
+function refreshSendChannels() {
+  if (!channels.copy) document.getElementById("copy-btn").style.display = "none";
+  if (!channels.download) document.getElementById("download-btn").style.display = "none";
+  document.getElementById("send-hint").textContent =
+    !channels.copy && !channels.download
+      ? "The review below is already selected — press Ctrl+C to copy it, then " +
+        "paste it into the chat."
+      : !channels.copy
+        ? "The review below is already selected — press Ctrl+C to copy it and " +
+          "paste it into the chat, or download the file and drop it into the chat."
+        : "Copy the review and paste it into the chat — or download it and " +
+          "send the file. Both carry the same review.";
 }
+function dropChannel(name) { channels[name] = false; refreshSendChannels(); }
+refreshSendChannels();
 (async () => {
   try {
-    if (document.permissionsPolicy &&
-        !document.permissionsPolicy.allowsFeature("clipboard-write")) {
-      disableCopyButton();
-      return;
-    }
-    if (navigator.permissions && navigator.permissions.query) {
+    const pp = document.permissionsPolicy;
+    if (pp && !pp.allowsFeature("clipboard-write")) {
+      dropChannel("copy");
+    } else if (navigator.permissions && navigator.permissions.query) {
       const st = await navigator.permissions.query({ name: "clipboard-write" });
-      if (st.state === "denied") disableCopyButton();
+      if (st.state === "denied") dropChannel("copy");
     }
-  } catch (e) { /* cannot probe — the click fallback still catches failure */ }
+    if (pp && pp.features && pp.features().includes("downloads") &&
+        !pp.allowsFeature("downloads")) {
+      dropChannel("download");
+    }
+  } catch (e) { /* cannot probe — the click fallbacks still catch failure */ }
 })();
 
 document.getElementById("send-btn").addEventListener("click", () => {
@@ -956,7 +981,7 @@ document.getElementById("copy-btn").addEventListener("click", async () => {
     await navigator.clipboard.writeText(blobJson);
     statusEl.textContent = "Copied — paste it into the chat.";
   } catch (e) {
-    disableCopyButton();
+    dropChannel("copy");
     statusEl.textContent = "Clipboard is blocked here — the text above is selected: " +
       "press Ctrl+C, or download the file.";
     const ta = document.getElementById("send-blob");
