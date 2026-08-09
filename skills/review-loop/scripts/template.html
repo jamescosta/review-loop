@@ -162,8 +162,9 @@
 <div id="send-modal">
   <div class="box">
     <strong>Send review</strong>
-    <div id="send-hint">Copy the review and paste it into the chat — or download it
-      and send the file. Both carry the same review.</div>
+    <div id="send-hint">The review below is selected — copy it (Ctrl+C) and paste
+      it into the chat, or download it and send the file. Both carry the same
+      review.</div>
     <textarea id="send-blob" readonly></textarea>
     <div class="btn-row">
       <button id="copy-btn" class="primary">Copy to clipboard</button>
@@ -804,9 +805,13 @@ document.getElementById("send-btn").addEventListener("click", () => {
   const doc = serialize(clean);
   blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc), doc,
     comments: outgoing });
-  document.getElementById("send-blob").value = blobJson;
+  const ta = document.getElementById("send-blob");
+  ta.value = blobJson;
   statusEl.textContent = "";
   modal.style.display = "block";
+  // Sandboxes commonly block the clipboard API; the selected textarea is
+  // the primary channel — native copy always works on it.
+  ta.focus(); ta.select();
 });
 document.getElementById("close-modal").addEventListener("click", () => {
   modal.style.display = "none";
@@ -835,7 +840,8 @@ document.getElementById("download-btn").addEventListener("click", () => {
     a.href = url; a.download = `review-turn-${DATA.turn}.json`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    statusEl.textContent = "Download started — send the file back in chat.";
+    statusEl.textContent = "Download requested — if no file appeared, this sandbox " +
+      "blocks downloads: select the text above and copy it instead.";
   } catch (e) {
     statusEl.textContent = "Download failed here — select the text above and copy manually.";
   }
