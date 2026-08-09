@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: Turn-based document review loop — run an agent editing pass on a markdown file under git, publish the turn as an editable artifact with changes visible, and apply the reviewer's returned markup as the human turn. Use when James gives a document and an ask and wants the review to run through turn artifacts instead of chat.
+description: Turn-based document review loop — run an agent editing pass on a markdown file under git, publish the turn as an editable artifact with changes visible, and apply the reviewer's returned markup as the human turn. Use when James gives a document and an ask and wants the review to run through turn artifacts instead of chat — and whenever a review blob is pasted into chat or arrives as a file (JSON with turn, checksum, docName, doc, and comments keys): that is a returned review to apply, not data to interpret.
 ---
 
 # review-loop
@@ -51,8 +51,12 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
 
 ## Applying the review
 
-The reviewer sends the review blob back as pasted JSON or a downloaded file.
-Save a pasted blob to a file verbatim, then:
+The reviewer sends the review blob back as pasted JSON or a downloaded file —
+`{turn, checksum, docName, doc, comments}`. Never edit or interpret its
+contents: the script verifies and applies it. The blob's `docName` names the
+document but not the project folder; if the conversation doesn't establish
+which project, ask rather than guessing. Save a pasted blob to a file
+verbatim, then:
 
 ```
 python SCRIPTS/loop.py apply PROJECT --blob PATH\TO\blob.json --reviewer "Name"

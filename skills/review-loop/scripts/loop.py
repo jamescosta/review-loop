@@ -355,6 +355,7 @@ def cmd_build_artifact(args):
     meta = json.loads(read_text(rd / "turn.json"))
     data = {
         "docName": state["doc"],
+        "builtAt": int(datetime.now(timezone.utc).timestamp() * 1000),
         "turn": state["turn"],
         "summary": meta["summary"],
         "questions": meta["questions"],

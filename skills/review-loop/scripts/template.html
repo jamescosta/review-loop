@@ -33,8 +33,11 @@
   body { background: var(--bg); color: var(--fg);
     font: 15px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif; margin: 0; }
   header { padding: 1.2rem 1.5rem .9rem; border-bottom: 1px solid var(--border); }
-  header h1 { font-size: 1.25rem; margin: 0 0 .2rem; }
-  .turn-note, .doc-name { color: var(--muted); font-size: .82rem; }
+  .header-row { display: flex; align-items: center; gap: .7rem; }
+  header h1 { font-size: 1.25rem; margin: 0; }
+  .pill { border: 1px solid var(--border); border-radius: 999px; padding: .15rem .6rem;
+    font-size: .75rem; color: var(--muted); white-space: nowrap; }
+  #refresh-btn { font-size: .78rem; padding: .2rem .6rem; }
   .summary { max-width: 68ch; margin: .6rem 0 0; }
   .questions { max-width: 68ch; margin: .4rem 0 0; padding-left: 1.4rem; }
   .questions li { margin: .15rem 0; }
@@ -78,13 +81,12 @@
     text-decoration: line-through; }
   .ins-block, .del-block { display: block; padding: .1rem .5rem; border-radius: 4px; }
   .changes-note { color: var(--muted); font-size: .82rem; font-style: italic; }
-  aside { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: .9rem; font-size: .87rem; position: sticky; top: 3.4rem;
+  aside { font-size: .87rem; position: sticky; top: 3.4rem;
     max-height: calc(100vh - 5rem); overflow-y: auto; }
-  aside h2 { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--muted); margin: 0 0 .6rem; }
-  .thread { border-top: 1px solid var(--border); padding: .6rem 0; }
-  .thread:first-of-type { border-top: none; }
+  .thread, #comment-form { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: .7rem .85rem; margin-bottom: .7rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+  .thread.flash { outline: 2px solid var(--accent); }
   .anchor-quote { color: var(--muted); font-size: .8rem; font-style: italic;
     cursor: pointer; }
   .anchor-quote:hover { color: var(--accent); }
@@ -102,10 +104,11 @@
   #comment-btn { position: absolute; z-index: 20; display: none;
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
     font-size: .78rem; padding: .2rem .55rem; }
-  #comment-form { display: none; margin-bottom: .8rem; padding-bottom: .8rem;
-    border-bottom: 2px solid var(--accent); }
+  #comment-form { display: none; border-color: var(--accent); }
+  mark.rl-hl { background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: inherit; border-bottom: 2px solid var(--accent); cursor: pointer; }
   #send-modal { display: none; position: fixed; inset: 0;
-    background: color-mix(in srgb, var(--fg) 25%, transparent); z-index: 40; }
+    background: rgba(8, 10, 14, .6); z-index: 40; }
   #send-modal .box { background: var(--bg); border: 1px solid var(--border);
     border-radius: 10px; max-width: 620px; margin: 8vh auto 0; padding: 1.1rem 1.3rem;
     display: flex; flex-direction: column; gap: .6rem; }
@@ -116,9 +119,11 @@
 </style>
 
 <header>
-  <h1>Turn <span id="turn-no"></span></h1>
-  <div class="turn-note">If chat says a later turn exists, refresh this page.
-    <span class="doc-name" id="doc-name"></span></div>
+  <div class="header-row">
+    <h1>Turn <span id="turn-no"></span></h1>
+    <span class="pill" id="updated-pill"></span>
+    <button id="refresh-btn" title="Reload to pick up a newer turn">&#8635; Refresh</button>
+  </div>
   <p class="summary" id="summary"></p>
   <div id="questions-wrap">
     <div class="qlabel">Questions for you</div>
@@ -145,7 +150,6 @@
     </div>
   </div>
   <aside>
-    <h2>Comments</h2>
     <div id="comment-form">
       <div class="anchor-quote" id="form-quote"></div>
       <textarea id="form-body" rows="3" placeholder="Your comment"></textarea>
@@ -537,7 +541,10 @@ function notice(cls, html) {
 
 /* Header */
 document.getElementById("turn-no").textContent = DATA.turn;
-document.getElementById("doc-name").textContent = "· " + DATA.docName;
+document.getElementById("updated-pill").textContent = "Updated " +
+  new Date(DATA.builtAt).toLocaleString(undefined,
+    { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+document.getElementById("refresh-btn").addEventListener("click", () => location.reload());
 document.getElementById("summary").textContent = DATA.summary;
 const qWrap = document.getElementById("questions-wrap");
 if (DATA.questions.length) {
@@ -698,8 +705,54 @@ document.getElementById("form-cancel").addEventListener("click", () => {
   pendingAnchor = null; form.style.display = "none";
 });
 
+/* Serializer-transparent highlights: mark elements wrap commented text; the
+   serializer recurses through unknown inline elements, so marks never reach
+   the markdown. */
+function clearHighlights() {
+  for (const m of Array.from(clean.querySelectorAll("mark.rl-hl"))) {
+    const parent = m.parentNode;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize();
+  }
+}
+
+function applyHighlight(anchor, threadId) {
+  const located = locateAnchor(anchor, clean);
+  if (!located) return;
+  const { idx, map } = located;
+  const end = idx + anchor.text.length;
+  const segments = [];
+  for (const e of map) {
+    const len = e.node.nodeValue.length;
+    const s = Math.max(idx, e.start);
+    const t = Math.min(end, e.start + len);
+    if (s < t) segments.push({ node: e.node, from: s - e.start, to: t - e.start });
+  }
+  for (const seg of segments) {
+    const r = document.createRange();
+    r.setStart(seg.node, seg.from);
+    r.setEnd(seg.node, seg.to);
+    const mark = document.createElement("mark");
+    mark.className = "rl-hl";
+    mark.dataset.thread = threadId;
+    try { r.surroundContents(mark); } catch (e) { /* partial node — skip */ }
+  }
+}
+
+clean.addEventListener("click", (e) => {
+  const m = e.target.closest ? e.target.closest("mark.rl-hl") : null;
+  if (!m) return;
+  const card = threadsEl.querySelector(`[data-thread-card="${m.dataset.thread}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 1200);
+});
+
 function renderThreads() {
   threadsEl.textContent = "";
+  clearHighlights();
   const items = [];
   for (const t of DATA.threads) {
     items.push({ id: t.id, anchor: t.anchor,
@@ -714,18 +767,20 @@ function renderThreads() {
   if (!items.length) {
     const d = document.createElement("div");
     d.className = "empty";
-    d.textContent = "No comments yet. Select text in clean view to add one.";
+    d.textContent = "Select text in the document to comment on it.";
     threadsEl.appendChild(d);
     return;
   }
   for (const t of items) {
     const div = document.createElement("div");
     div.className = "thread";
+    div.dataset.threadCard = t.id;
     const located = locateAnchor(t.anchor, clean);
     if (!located) {
       const o = document.createElement("span");
       o.className = "orphan";
-      o.textContent = "anchor changed — was: “" + t.anchor.text.slice(0, 50) + "”";
+      o.textContent = "commented text was edited away — was: “" +
+        t.anchor.text.slice(0, 50) + "”";
       div.appendChild(o);
     } else {
       const q = document.createElement("div");
@@ -771,6 +826,7 @@ function renderThreads() {
     }
     threadsEl.appendChild(div);
   }
+  for (const t of items) applyHighlight(t.anchor, t.id);
 }
 
 function selectAnchor(anchor) {
@@ -802,10 +858,21 @@ const modal = document.getElementById("send-modal");
 const statusEl = document.getElementById("send-status");
 let blobJson = "";
 
+/* No dead controls: when the embedding's permissions policy blocks the
+   clipboard API, drop the Copy button and lead with select+copy. */
+const CLIPBOARD_OK = !(document.permissionsPolicy &&
+  !document.permissionsPolicy.allowsFeature("clipboard-write"));
+if (!CLIPBOARD_OK) {
+  document.getElementById("copy-btn").style.display = "none";
+  document.getElementById("send-hint").textContent = "The review below is already " +
+    "selected — press Ctrl+C to copy it and paste it into the chat, or download " +
+    "the file and drop it into the chat.";
+}
+
 document.getElementById("send-btn").addEventListener("click", () => {
   const doc = serialize(clean);
-  blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc), doc,
-    comments: outgoing });
+  blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc),
+    docName: DATA.docName, doc, comments: outgoing });
   const ta = document.getElementById("send-blob");
   ta.value = blobJson;
   statusEl.textContent = "";
