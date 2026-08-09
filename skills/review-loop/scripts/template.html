@@ -528,7 +528,15 @@ const noticesEl = document.getElementById("notices");
 const threadsEl = document.getElementById("threads");
 let outgoing = [];          // reviewer-authored comments/replies this turn
 let resolvedLocal = [];     // thread ids the reviewer resolved this turn
+// Seed past this turn's existing thread ids so a new comment or reply can
+// never collide with a thread already in the data.
 let commentSeq = 1;
+for (const t of DATA.threads) {
+  const m = /^c(\d+)-(\d+)$/.exec(t.id);
+  if (m && Number(m[1]) === DATA.turn) {
+    commentSeq = Math.max(commentSeq, Number(m[2]) + 1);
+  }
+}
 let editingEnabled = true;
 let storageOK = false;
 const storageKey = `rl-${DATA.checksum}-${DATA.turn}`;

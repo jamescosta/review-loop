@@ -253,6 +253,16 @@ def test_resolve_flow(project, tmp_path):
     assert json.loads(payload)["threads"] == []
 
 
+def test_build_artifact_refuses_applied_turn(project, tmp_path):
+    base = (project / ".review" / "base.md").read_text(encoding="utf-8")
+    bf = tmp_path / "b.json"
+    write_lf(bf, json.dumps(make_blob(base, turn=1)))
+    assert run(["apply", project, "--blob", bf, "--reviewer", "R"]).returncode == 0
+    r = run(["build-artifact", project])
+    assert r.returncode == 2
+    assert "already applied" in r.stderr and "agent-commit" in r.stderr
+
+
 def test_apply_rejects_unknown_resolve_id(project, tmp_path):
     base = (project / ".review" / "base.md").read_text(encoding="utf-8")
     blob = make_blob(base, turn=1, resolved=["no-such-thread"])

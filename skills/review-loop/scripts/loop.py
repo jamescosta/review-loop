@@ -351,6 +351,10 @@ def cmd_build_artifact(args):
     state = load_state(project)
     if state["turn"] == 0:
         fail("no agent turn yet — run agent-commit first.")
+    if state["applied"]:
+        fail(f"turn {state['turn']}'s review was already applied — the artifact would "
+             "show a closed turn that rejects every review sent from it. Take the "
+             "next agent pass (agent-commit) first.")
     rd = review_dir(project)
     meta = json.loads(read_text(rd / "turn.json"))
     data = {
