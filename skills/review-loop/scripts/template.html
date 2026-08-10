@@ -1,0 +1,1016 @@
+<title>Review loop — __DOC_TITLE__</title>
+<style>
+  /* Palette appears four times by design: the claude.ai artifact viewer —
+     the host page embedding this file, not anything in this file — stamps
+     data-theme on the root at runtime, and its toggle must override the
+     media query in both directions. Keep all four blocks in sync. */
+  :root {
+    --bg: #fafbfc; --panel: #f1f3f6; --fg: #1c2430; --muted: #5c6773;
+    --border: #d5dae1; --accent: #3556c7; --accent-fg: #ffffff;
+    --ins-bg: #e2f4e5; --ins-fg: #14571f; --del-bg: #fbe4e4; --del-fg: #8c1a1a;
+    --warn-bg: #fff3d6; --warn-fg: #6b4d00; --danger-bg: #fbdada; --danger-fg: #7c1212;
+    --code-bg: #eceff3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161a20; --panel: #1e242d; --fg: #e3e8ee; --muted: #96a0ac;
+      --border: #333b46; --accent: #7c96ea; --accent-fg: #10131a;
+      --ins-bg: #1c3a22; --ins-fg: #9fd8a8; --del-bg: #46201f; --del-fg: #eda8a8;
+      --warn-bg: #3d3212; --warn-fg: #e8c76a; --danger-bg: #4a1c1c; --danger-fg: #f0a2a2;
+      --code-bg: #262d37;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161a20; --panel: #1e242d; --fg: #e3e8ee; --muted: #96a0ac;
+    --border: #333b46; --accent: #7c96ea; --accent-fg: #10131a;
+    --ins-bg: #1c3a22; --ins-fg: #9fd8a8; --del-bg: #46201f; --del-fg: #eda8a8;
+    --warn-bg: #3d3212; --warn-fg: #e8c76a; --danger-bg: #4a1c1c; --danger-fg: #f0a2a2;
+    --code-bg: #262d37;
+  }
+  :root[data-theme="light"] {
+    --bg: #fafbfc; --panel: #f1f3f6; --fg: #1c2430; --muted: #5c6773;
+    --border: #d5dae1; --accent: #3556c7; --accent-fg: #ffffff;
+    --ins-bg: #e2f4e5; --ins-fg: #14571f; --del-bg: #fbe4e4; --del-fg: #8c1a1a;
+    --warn-bg: #fff3d6; --warn-fg: #6b4d00; --danger-bg: #fbdada; --danger-fg: #7c1212;
+    --code-bg: #eceff3;
+  }
+  body { background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif; margin: 0; }
+  .toolbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    gap: .7rem; padding: .55rem 1.5rem; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  .toolbar-left { display: flex; align-items: center; gap: .7rem; min-width: 0; }
+  .toolbar h1 { font-size: 1.1rem; margin: 0; white-space: nowrap; }
+  .pill { border: 1px solid var(--border); border-radius: 999px; padding: .15rem .6rem;
+    font-size: .75rem; color: var(--muted); white-space: nowrap; }
+  #refresh-btn { font-size: .78rem; padding: .2rem .6rem; }
+  .seg { display: inline-flex; justify-self: center; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; padding: 3px; gap: 2px; }
+  .seg button { border: none; background: none; border-radius: 6px;
+    padding: .22rem .85rem; font-size: .82rem; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg);
+    font-weight: 600; }
+  .toolbar-right { justify-self: end; }
+  button { font: inherit; font-size: .85rem; padding: .35rem .8rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--fg); cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .notice { margin: .8rem 1.5rem 0; padding: .55rem .9rem; border-radius: 6px;
+    font-size: .85rem; }
+  .notice.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .notice.danger { background: var(--danger-bg); color: var(--danger-fg); }
+  .notice button { margin-left: .6rem; font-size: .78rem; padding: .15rem .5rem; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem;
+    padding: 1.2rem 1.5rem 4rem; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .doc { max-width: 72ch; min-height: 8rem; }
+  .doc:focus-visible { outline: none; }
+  #clean[contenteditable="true"] { border-left: 3px solid transparent; padding-left: .8rem; }
+  #clean[contenteditable="true"]:focus-within { border-left-color: var(--accent); }
+  .doc h1 { font-size: 1.5rem; } .doc h2 { font-size: 1.25rem; } .doc h3 { font-size: 1.05rem; }
+  .doc h1, .doc h2, .doc h3, .doc h4 { text-wrap: balance; }
+  .doc code { background: var(--code-bg); border-radius: 4px; padding: .08em .3em;
+    font: .88em ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  .doc pre { background: var(--code-bg); border-radius: 6px; padding: .7rem .9rem;
+    overflow-x: auto; }
+  .doc pre code { background: none; padding: 0; }
+  .doc a { color: var(--accent); }
+  #changes ins, .ins-block { background: var(--ins-bg); color: var(--ins-fg);
+    text-decoration: none; }
+  #changes del, .del-block { background: var(--del-bg); color: var(--del-fg);
+    text-decoration: line-through; }
+  .ins-block, .del-block { display: block; padding: .1rem .5rem; border-radius: 4px; }
+  .changes-note { color: var(--muted); font-size: .82rem; font-style: italic; }
+  aside { font-size: .87rem; position: sticky; top: 3.4rem;
+    max-height: calc(100vh - 5rem); overflow-y: auto; }
+  .thread, #comment-form { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: .7rem .85rem; margin-bottom: .7rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+  .thread.flash { outline: 2px solid var(--accent); }
+  .anchor-quote { color: var(--muted); font-size: .8rem; font-style: italic;
+    cursor: pointer; }
+  .anchor-quote:hover { color: var(--accent); }
+  .orphan { color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px;
+    padding: .1rem .4rem; font-size: .78rem; margin-bottom: .2rem; }
+  .msg { margin: .55rem 0 0; }
+  .msg-head { display: flex; align-items: center; gap: .45rem; }
+  .avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--border);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .7rem; font-weight: 700; flex: none; }
+  .msg.agent .avatar { background: var(--accent); color: var(--accent-fg); }
+  .msg-name { font-weight: 600; font-size: .78rem; }
+  .msg.agent .msg-name { color: var(--accent); }
+  .msg-body { margin: .15rem 0 0 1.9rem; }
+  .card-head { display: flex; align-items: center; gap: .4rem; }
+  .card-head .anchor-quote { flex: 1; min-width: 0; }
+  .resolve-btn, .undo-btn { font-size: .7rem; padding: .1rem .45rem; flex: none; }
+  .thread.resolved-card { opacity: .65; }
+  .resolved-line { color: var(--muted); font-size: .8rem; }
+  .thread textarea, #comment-form textarea, #send-modal textarea {
+    width: 100%; box-sizing: border-box; font: inherit; background: var(--bg);
+    color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
+    padding: .4rem; margin-top: .4rem; }
+  .thread .reply-row { display: flex; gap: .4rem; margin-top: .3rem; }
+  .remove-comment { margin-left: auto; font-size: .7rem; padding: .05rem .35rem; }
+  #comment-btn { position: absolute; z-index: 20; display: none;
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+    font-size: .78rem; padding: .2rem .55rem; }
+  #comment-form { display: none; border-color: var(--accent); }
+  mark.rl-hl { background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: inherit; border-bottom: 2px solid var(--accent); cursor: pointer; }
+  #send-modal { display: none; position: fixed; inset: 0;
+    background: rgba(8, 10, 14, .6); z-index: 40; }
+  #send-modal .box { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; max-width: 620px; margin: 8vh auto 0; padding: 1.1rem 1.3rem;
+    display: flex; flex-direction: column; gap: .6rem; }
+  #send-modal textarea { font: .78rem ui-monospace, Consolas, monospace; height: 9rem; }
+  #send-status { font-size: .84rem; min-height: 1.2em; }
+  .btn-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+
+<div class="toolbar">
+  <div class="toolbar-left">
+    <h1>Turn <span id="turn-no"></span></h1>
+    <span class="pill" id="updated-pill"></span>
+    <button id="refresh-btn" title="Reload to pick up a newer turn">&#8635; Refresh</button>
+  </div>
+  <div class="seg" role="group" aria-label="View">
+    <button id="view-clean" aria-pressed="true" title="The editable document">Clean</button>
+    <button id="view-changes" aria-pressed="false" title="What the agent changed this turn">Changes</button>
+  </div>
+  <div class="toolbar-right">
+    <button id="send-btn" class="primary">Send review</button>
+  </div>
+</div>
+
+<div id="notices"></div>
+
+<main>
+  <div>
+    <div id="clean" class="doc" contenteditable="true" spellcheck="true"></div>
+    <div id="changes" class="doc" hidden>
+      <p class="changes-note">Read-only. Insertions are highlighted, deletions struck.
+        To reject a change, flip to clean view and edit it back.</p>
+      <div id="changes-body"></div>
+    </div>
+  </div>
+  <aside>
+    <div id="comment-form">
+      <div class="anchor-quote" id="form-quote"></div>
+      <textarea id="form-body" rows="3" placeholder="Your comment"></textarea>
+      <div class="btn-row" style="margin-top:.4rem">
+        <button id="form-add" class="primary">Add comment</button>
+        <button id="form-cancel">Cancel</button>
+      </div>
+    </div>
+    <div id="threads"></div>
+  </aside>
+</main>
+
+<button id="comment-btn">💬 Comment</button>
+
+<div id="send-modal">
+  <div class="box">
+    <strong>Send review</strong>
+    <div id="send-hint">The review below is selected — copy it (Ctrl+C) and paste
+      it into the chat, or download it and send the file. Both carry the same
+      review.</div>
+    <textarea id="send-blob" readonly></textarea>
+    <div class="btn-row">
+      <button id="copy-btn" class="primary">Copy to clipboard</button>
+      <button id="download-btn">Download file</button>
+      <button id="close-modal">Close</button>
+    </div>
+    <div id="send-status"></div>
+  </div>
+</div>
+
+<script id="rl-data" type="application/json">__REVIEW_LOOP_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("rl-data").textContent);
+
+/* ---------------------------------------------------------------- checksum
+   FNV-1a 32-bit over UTF-8 bytes — must match fnv1a() in loop.py. */
+function fnv1a(str) {
+  const bytes = new TextEncoder().encode(str);
+  let h = 0x811c9dc5;
+  for (const b of bytes) { h ^= b; h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/* ------------------------------------------------------ markdown block model
+   splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
+   drift, the round-trip self-check reports false mismatches. */
+const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
+const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
+
+function splitBlocks(doc) {
+  const blocks = []; let cur = []; let fence = false;
+  for (const ln of doc.split("\n")) {
+    const stripped = ln.trim();
+    if (!fence && stripped.startsWith("```")) {
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+      fence = true; cur.push(ln); continue;
+    }
+    if (fence) {
+      cur.push(ln);
+      if (stripped.startsWith("```")) {
+        fence = false; blocks.push(cur.join("\n")); cur = [];
+      }
+      continue;
+    }
+    if (stripped === "") {
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+    } else cur.push(ln);
+  }
+  if (cur.length) blocks.push(cur.join("\n"));
+  return blocks;
+}
+
+function blockKind(block) {
+  const first = block.split("\n", 1)[0];
+  if (first.trimStart().startsWith("```")) return "fence";
+  if (/^#{1,6}\s/.test(first)) return "heading";
+  if (LIST_LINE.test(first)) return "list";
+  return "para";
+}
+
+const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
+
+function parseListItems(lines) {
+  // The first line always carries a marker — that is what made the block a
+  // list; later marker-less lines are soft-wrap continuations of their item.
+  const items = [];
+  for (const l of lines) {
+    const m = LIST_LINE.exec(l);
+    if (m) {
+      items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
+        text: l.slice(m[0].length) });
+    } else if (items.length) {
+      items[items.length - 1].text += " " + l.trim();
+    }
+  }
+  return items;
+}
+
+function quoted(text, n) {
+  return "“" + text.slice(0, n) + (text.length > n ? "…" : "") + "”";
+}
+
+function normalize(doc) {
+  doc = doc.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(NBSP_RE, " ");
+  const out = [];
+  for (const b of splitBlocks(doc)) {
+    const kind = blockKind(b);
+    const lines = b.split("\n");
+    if (kind === "fence") {
+      out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
+    } else if (kind === "heading") {
+      out.push(collapse(lines[0]));
+      const rest = collapse(lines.slice(1).join(" "));
+      if (rest) out.push(rest);
+    } else if (kind === "list") {
+      out.push(parseListItems(lines).map((it) =>
+        ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
+          collapse(it.text)).trimEnd()).join("\n"));
+    } else {
+      out.push(collapse(lines.join(" ")));
+    }
+  }
+  return out.join("\n\n");
+}
+
+/* ------------------------------------------------------------- renderer */
+function renderInline(text, parent) {
+  let i = 0; let buf = "";
+  const flush = () => { if (buf) { parent.appendChild(document.createTextNode(buf)); buf = ""; } };
+  while (i < text.length) {
+    const rest = text.slice(i); let m;
+    if ((m = rest.match(/^`([^`]+)`/))) {
+      flush(); const c = document.createElement("code"); c.textContent = m[1];
+      parent.appendChild(c); i += m[0].length;
+    } else if ((m = rest.match(/^\*\*(.+?)\*\*/))) {
+      flush(); const s = document.createElement("strong"); renderInline(m[1], s);
+      parent.appendChild(s); i += m[0].length;
+    } else if ((m = rest.match(/^\*([^*\s][^*]*)\*/))) {
+      flush(); const s = document.createElement("em"); renderInline(m[1], s);
+      parent.appendChild(s); i += m[0].length;
+    } else if ((m = rest.match(/^\[([^\]]+)\]\(([^)\s]+)\)/))) {
+      flush(); const a = document.createElement("a"); a.setAttribute("href", m[2]);
+      renderInline(m[1], a); parent.appendChild(a); i += m[0].length;
+    } else { buf += text[i]; i += 1; }
+  }
+  flush();
+}
+
+function renderBlock(block, container) {
+  const kind = blockKind(block);
+  const lines = block.split("\n");
+  if (kind === "fence") {
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    pre.dataset.lang = lines[0].trim().slice(3).trim();
+    code.textContent = lines.slice(1, lines[lines.length - 1].trim().startsWith("```")
+      ? lines.length - 1 : lines.length).join("\n");
+    pre.appendChild(code); container.appendChild(pre);
+  } else if (kind === "heading") {
+    const level = lines[0].match(/^#{1,6}/)[0].length;
+    const h = document.createElement("h" + level);
+    renderInline(lines[0].replace(/^#{1,6}\s+/, ""), h);
+    container.appendChild(h);
+    const rest = lines.slice(1).join(" ").trim();
+    if (rest) { const p = document.createElement("p"); renderInline(rest, p); container.appendChild(p); }
+  } else if (kind === "list") {
+    const items = parseListItems(lines);
+    const stack = [];
+    for (const item of items) {
+      while (stack.length && stack[stack.length - 1].level > item.level) stack.pop();
+      const top = () => stack[stack.length - 1];
+      if (stack.length && top().level === item.level &&
+          (top().list.tagName === "OL") !== item.ordered) stack.pop();
+      while (!stack.length || top().level < item.level) {
+        const level = stack.length ? top().level + 1 : 0;
+        const list = document.createElement(item.ordered ? "ol" : "ul");
+        if (stack.length) {
+          (top().list.lastElementChild || top().list).appendChild(list);
+        } else container.appendChild(list);
+        stack.push({ list, level });
+        if (level >= item.level) break;
+      }
+      const li = document.createElement("li");
+      renderInline(item.text, li);
+      top().list.appendChild(li);
+    }
+  } else {
+    const p = document.createElement("p");
+    renderInline(lines.join(" "), p);
+    container.appendChild(p);
+  }
+}
+
+function renderMarkdown(md, container) {
+  container.textContent = "";
+  for (const b of splitBlocks(md)) renderBlock(b, container);
+}
+
+/* ------------------------------------------------------------ serializer
+   The single serializer: editable DOM back to markdown, covering exactly
+   the rendered subset. Inverse of the renderer over that subset. */
+const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
+  "UL", "OL", "PRE"]);
+
+function serializeInline(node) {
+  if (node.nodeType === 3) return node.nodeValue.replace(NBSP_RE, " ");
+  if (node.nodeType !== 1) return "";
+  const tag = node.tagName;
+  if (tag === "BR") return "\n";
+  const inner = Array.from(node.childNodes).map(serializeInline).join("");
+  if (tag === "STRONG" || tag === "B") return inner ? "**" + inner + "**" : "";
+  if (tag === "EM" || tag === "I") return inner ? "*" + inner + "*" : "";
+  if (tag === "CODE") return node.textContent ? "`" + node.textContent + "`" : "";
+  if (tag === "A") return "[" + inner + "](" + (node.getAttribute("href") || "") + ")";
+  return inner;
+}
+
+function serializeList(listEl, depth) {
+  const lines = []; let idx = 1;
+  for (const child of listEl.children) {
+    if (child.tagName === "UL" || child.tagName === "OL") {
+      lines.push(...serializeList(child, depth + 1));
+      continue;
+    }
+    if (child.tagName !== "LI") continue;
+    let content = ""; const sublists = [];
+    for (const n of child.childNodes) {
+      if (n.nodeType === 1 && (n.tagName === "UL" || n.tagName === "OL")) sublists.push(n);
+      else content += serializeInline(n);
+    }
+    const marker = listEl.tagName === "OL" ? `${idx}. ` : "- ";
+    lines.push("  ".repeat(depth) + marker + collapse(content));
+    for (const s of sublists) lines.push(...serializeList(s, depth + 1));
+    idx += 1;
+  }
+  return lines;
+}
+
+function serializeContainer(root, blocks) {
+  let run = [];
+  const flushRun = () => {
+    if (!run.length) return;
+    const text = run.map(serializeInline).join("");
+    if (text.trim()) blocks.push(text.trim());
+    run = [];
+  };
+  for (const node of root.childNodes) {
+    if (node.nodeType === 1 && BLOCK_TAGS.has(node.tagName)) {
+      flushRun();
+      const tag = node.tagName;
+      if (/^H[1-6]$/.test(tag)) {
+        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        if (t) blocks.push("#".repeat(+tag[1]) + " " + t);
+      } else if (tag === "UL" || tag === "OL") {
+        const lines = serializeList(node, 0);
+        if (lines.length) blocks.push(lines.join("\n"));
+      } else if (tag === "PRE") {
+        const lang = node.dataset.lang || "";
+        blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
+      } else if (tag === "DIV" &&
+          Array.from(node.children).some((c) => BLOCK_TAGS.has(c.tagName))) {
+        serializeContainer(node, blocks);
+      } else {
+        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        if (t) blocks.push(t);
+      }
+    } else run.push(node);
+  }
+  flushRun();
+}
+
+function serialize(root) {
+  const blocks = [];
+  serializeContainer(root, blocks);
+  return blocks.join("\n\n") + "\n";
+}
+
+/* ----------------------------------------------------------- changes view
+   Skill-computed diff decorated into a read-only render. Word-level ops use
+   private-use marker chars that survive markdown rendering, then become
+   ins/del elements — decoration never enters the editable DOM. */
+const INS_O = "\uE000", INS_C = "\uE001", DEL_O = "\uE002", DEL_C = "\uE003";
+
+function decorateMarkers(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let state = null;
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    if (!/[\uE000-\uE003]/.test(text) && !state) continue;
+    const frag = document.createDocumentFragment();
+    let buf = "";
+    const flush = () => {
+      if (!buf) return;
+      if (state) { const el = document.createElement(state); el.textContent = buf; frag.appendChild(el); }
+      else frag.appendChild(document.createTextNode(buf));
+      buf = "";
+    };
+    for (const ch of text) {
+      if (ch === INS_O) { flush(); state = "ins"; }
+      else if (ch === DEL_O) { flush(); state = "del"; }
+      else if (ch === INS_C || ch === DEL_C) { flush(); state = null; }
+      else buf += ch;
+    }
+    flush();
+    node.parentNode.replaceChild(frag, node);
+  }
+}
+
+function buildChangesView(container) {
+  container.textContent = "";
+  for (const part of DATA.diff) {
+    if (part.t === "eq") { renderBlock(part.md, container); continue; }
+    if (part.t === "ins" || part.t === "del") {
+      const wrap = document.createElement("div");
+      wrap.className = part.t === "ins" ? "ins-block" : "del-block";
+      renderBlock(part.md, wrap);
+      container.appendChild(wrap);
+      continue;
+    }
+    const merged = part.ops.map(([op, txt]) =>
+      op === "eq" ? txt : op === "del" ? DEL_O + txt + DEL_C : INS_O + txt + INS_C).join("");
+    const wrap = document.createElement("div");
+    renderBlock(merged, wrap);
+    decorateMarkers(wrap);
+    while (wrap.firstChild) container.appendChild(wrap.firstChild);
+  }
+}
+
+/* ----------------------------------------------------- doc text + anchors */
+function docTextAndMap(root) {
+  let text = ""; const map = [];
+  (function walk(node) {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { map.push({ node: child, start: text.length }); text += child.nodeValue; }
+      else if (child.nodeType === 1) {
+        walk(child);
+        if (BLOCK_TAGS.has(child.tagName)) text += "\n";
+      }
+    }
+  })(root);
+  return { text: text.replace(NBSP_RE, " "), map };
+}
+
+function pointOffset(container, offset, map) {
+  if (container.nodeType === 3) {
+    const entry = map.find((e) => e.node === container);
+    return entry ? entry.start + offset : null;
+  }
+  // Element boundary: use the first text node at or after the child position.
+  let target = container.childNodes[offset] || null;
+  while (target && target.nodeType !== 3 && target.firstChild) target = target.firstChild;
+  if (target && target.nodeType === 3) {
+    const entry = map.find((e) => e.node === target);
+    return entry ? entry.start : null;
+  }
+  // No text node there (boundary past the last child, or a text-less child):
+  // anchor to the container's own first/last text descendant, never to the
+  // document's ends.
+  const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  if (offset === 0) {
+    const first = tw.nextNode();
+    const entry = first && map.find((e) => e.node === first);
+    return entry ? entry.start : null;
+  }
+  let last = null;
+  while (tw.nextNode()) last = tw.currentNode;
+  const entry = last && map.find((e) => e.node === last);
+  return entry ? entry.start + last.nodeValue.length : null;
+}
+
+function locateAnchor(anchor, root, ctx) {
+  if (!ctx) ctx = docTextAndMap(root);
+  let idx = -1; let from = 0;
+  for (let k = 0; k <= anchor.occurrence; k += 1) {
+    idx = ctx.text.indexOf(anchor.text, from);
+    if (idx < 0) return null;
+    from = idx + 1;
+  }
+  return { idx, map: ctx.map };
+}
+
+function segmentsFor(map, from, to) {
+  // Per-text-node slices of the document range [from, to).
+  const segs = [];
+  for (const e of map) {
+    const len = e.node.nodeValue.length;
+    const s = Math.max(from, e.start);
+    const t = Math.min(to, e.start + len);
+    if (s < t) segs.push({ node: e.node, from: s - e.start, to: t - e.start });
+  }
+  return segs;
+}
+
+/* ---------------------------------------------------------------- app */
+const clean = document.getElementById("clean");
+const changesEl = document.getElementById("changes");
+const noticesEl = document.getElementById("notices");
+const threadsEl = document.getElementById("threads");
+let outgoing = [];          // reviewer-authored comments/replies this turn
+let resolvedLocal = [];     // thread ids the reviewer resolved this turn
+// Ids are unique by construction: threads always carry an earlier turn's
+// number than DATA.turn, and apply rejects any collision store-side.
+let commentSeq = 1;
+let storageOK = false;
+const storageKey = `rl-${DATA.checksum}-${DATA.turn}`;
+
+function notice(cls, html) {
+  const div = document.createElement("div");
+  div.className = "notice " + cls;
+  div.innerHTML = html;
+  noticesEl.appendChild(div);
+  return div;
+}
+
+/* Header */
+document.getElementById("turn-no").textContent = DATA.turn;
+document.getElementById("updated-pill").textContent = "Updated " +
+  new Date(DATA.builtAt).toLocaleString(undefined,
+    { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+document.getElementById("refresh-btn").addEventListener("click", () => location.reload());
+
+/* Render + self-check: round-trip our own unedited DOM against the embedded
+   base; on mismatch the turn is not used. */
+renderMarkdown(DATA.baseDoc, clean);
+let selfCheckOK = true;
+if (fnv1a(DATA.baseDoc) !== DATA.checksum) {
+  selfCheckOK = false;
+  notice("danger", "<strong>Self-check failed:</strong> the embedded document does not " +
+    "match its checksum — this page is corrupt. Don't review here; tell the agent " +
+    "the self-check failed so it can rebuild the turn.");
+} else if (normalize(serialize(clean)) !== normalize(DATA.baseDoc)) {
+  selfCheckOK = false;
+  notice("danger", "<strong>Self-check failed:</strong> this page cannot faithfully " +
+    "capture edits to this document (round-trip mismatch). Don't review here — " +
+    "tell the agent the self-check failed so it can rebuild the turn. " +
+    "This turn will not be used.");
+}
+if (!selfCheckOK) {
+  clean.setAttribute("contenteditable", "false");
+  document.getElementById("send-btn").disabled = true;
+}
+
+let changesBuilt = false;  // the changes view builds lazily on first open
+
+/* Autosave probe (build-day-one verification 2): if storage doesn't survive
+   the sandbox, the page carries the persistent unsent-edits notice. */
+try {
+  localStorage.setItem("rl-probe", "1");
+  localStorage.removeItem("rl-probe");
+  storageOK = true;
+} catch (e) { /* storage unavailable — the notice below says so */ }
+if (!storageOK) {
+  notice("warn", "Unsent edits are lost if you close this tab — send your review " +
+    "before closing.");
+} else if (selfCheckOK) {
+  const saved = localStorage.getItem(storageKey);
+  if (saved) {
+    try {
+      const draft = JSON.parse(saved);
+      renderMarkdown(draft.doc, clean);
+      outgoing = draft.outgoing || [];
+      resolvedLocal = draft.resolved || [];
+      if (draft.seq) commentSeq = Math.max(commentSeq, draft.seq);
+      const n = notice("warn", "Restored unsent edits from an earlier visit. ");
+      const btn = document.createElement("button");
+      btn.textContent = "Discard restored edits";
+      btn.addEventListener("click", () => {
+        localStorage.removeItem(storageKey);
+        outgoing = []; resolvedLocal = [];
+        renderMarkdown(DATA.baseDoc, clean);
+        renderThreads(); n.remove();
+      });
+      n.appendChild(btn);
+    } catch (e) { localStorage.removeItem(storageKey); }
+  }
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  if (!storageOK || !selfCheckOK) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(storageKey,
+        JSON.stringify({ doc: serialize(clean), outgoing, resolved: resolvedLocal,
+          seq: commentSeq }));
+    } catch (e) { /* storage full or revoked — the notice already warned */ }
+  }, 400);
+}
+clean.addEventListener("input", scheduleSave);
+
+/* Paste is stripped to plain text. */
+clean.addEventListener("paste", (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+  document.execCommand("insertText", false, text);
+});
+
+/* View toggle */
+const btnClean = document.getElementById("view-clean");
+const btnChanges = document.getElementById("view-changes");
+function setView(which) {
+  if (which === "changes" && !changesBuilt) {
+    buildChangesView(document.getElementById("changes-body"));
+    changesBuilt = true;
+  }
+  clean.hidden = which !== "clean";
+  changesEl.hidden = which !== "changes";
+  btnClean.setAttribute("aria-pressed", String(which === "clean"));
+  btnChanges.setAttribute("aria-pressed", String(which === "changes"));
+  hideCommentBtn();
+}
+btnClean.addEventListener("click", () => setView("clean"));
+btnChanges.addEventListener("click", () => setView("changes"));
+
+/* -------------------------------------------------------------- comments */
+const commentBtn = document.getElementById("comment-btn");
+const form = document.getElementById("comment-form");
+let pendingAnchor = null;
+
+function hideCommentBtn() {
+  if (commentBtn.style.display === "block") commentBtn.style.display = "none";
+}
+
+document.addEventListener("selectionchange", () => {
+  // Cheap checks first: this fires on every caret move while typing, and
+  // offsetParent forces layout.
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !selfCheckOK ||
+      !clean.contains(sel.anchorNode) || !clean.offsetParent) return hideCommentBtn();
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect.width && !rect.height) return hideCommentBtn();
+  commentBtn.style.display = "block";
+  commentBtn.style.top = (window.scrollY + rect.top - 34) + "px";
+  commentBtn.style.left = (window.scrollX + Math.min(rect.right,
+    window.innerWidth - 120)) + "px";
+});
+
+commentBtn.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const { text, map } = docTextAndMap(clean);
+  let start = pointOffset(range.startContainer, range.startOffset, map);
+  let end = pointOffset(range.endContainer, range.endOffset, map);
+  if (start === null || end === null || start === end) return;
+  if (start > end) { const t = start; start = end; end = t; }
+  // Trim whitespace off the selection edges so anchors are stable.
+  while (start < end && /\s/.test(text[start])) start += 1;
+  while (end > start && /\s/.test(text[end - 1])) end -= 1;
+  if (start === end) return;
+  const anchorText = text.slice(start, end);
+  let occurrence = 0; let from = 0;
+  while (true) {
+    const i = text.indexOf(anchorText, from);
+    if (i < 0 || i >= start) break;
+    occurrence += 1; from = i + 1;
+  }
+  pendingAnchor = { text: anchorText, occurrence,
+    before: text.slice(Math.max(0, start - 30), start),
+    after: text.slice(end, end + 30) };
+  document.getElementById("form-quote").textContent =
+    "On: " + quoted(anchorText, 80);
+  form.style.display = "block";
+  document.getElementById("form-body").value = "";
+  document.getElementById("form-body").focus();
+  hideCommentBtn();
+});
+
+document.getElementById("form-add").addEventListener("click", () => {
+  const body = document.getElementById("form-body").value.trim();
+  if (!body || !pendingAnchor) return;
+  outgoing.push({ id: `c${DATA.turn}-${commentSeq++}`, reply_to: null,
+    anchor: pendingAnchor, body });
+  pendingAnchor = null; form.style.display = "none";
+  renderThreads(); scheduleSave();
+});
+document.getElementById("form-cancel").addEventListener("click", () => {
+  pendingAnchor = null; form.style.display = "none";
+});
+
+/* Serializer-transparent highlights: mark elements wrap commented text; the
+   serializer recurses through unknown inline elements, so marks never reach
+   the markdown. */
+function clearHighlights() {
+  const parents = new Set();
+  for (const m of Array.from(clean.querySelectorAll("mark.rl-hl"))) {
+    const parent = m.parentNode;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parents.add(parent);
+  }
+  for (const p of parents) p.normalize();
+}
+
+clean.addEventListener("click", (e) => {
+  const m = e.target.closest ? e.target.closest("mark.rl-hl") : null;
+  if (!m) return;
+  const card = threadsEl.querySelector(`[data-thread-card="${m.dataset.thread}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 1200);
+});
+
+function renderThreads() {
+  threadsEl.textContent = "";
+  clearHighlights();
+  // One document walk serves every anchor lookup and highlight this render.
+  const ctx = docTextAndMap(clean);
+  const hlSegs = [];
+  const items = [];
+  for (const t of DATA.threads) {
+    items.push({ id: t.id, anchor: t.anchor,
+      messages: t.messages.concat(outgoing.filter((c) => c.reply_to === t.id)
+        .map((c) => ({ author: "you", body: c.body, outgoingId: c.id }))),
+      existing: true });
+  }
+  for (const c of outgoing.filter((c) => !c.reply_to)) {
+    items.push({ id: c.id, anchor: c.anchor,
+      messages: [{ author: "you", body: c.body, outgoingId: c.id }], existing: false });
+  }
+  if (!items.length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "Select text in the document to comment on it.";
+    threadsEl.appendChild(d);
+    return;
+  }
+  for (const t of items) {
+    const div = document.createElement("div");
+    div.className = "thread";
+    div.dataset.threadCard = t.id;
+    if (resolvedLocal.includes(t.id)) {
+      div.classList.add("resolved-card");
+      const line = document.createElement("div");
+      line.className = "card-head";
+      const s = document.createElement("span");
+      s.className = "resolved-line";
+      s.textContent = "Resolved — " + quoted(t.anchor.text, 40);
+      const u = document.createElement("button");
+      u.className = "undo-btn"; u.textContent = "Undo";
+      u.addEventListener("click", () => {
+        resolvedLocal = resolvedLocal.filter((id) => id !== t.id);
+        renderThreads(); scheduleSave();
+      });
+      line.appendChild(s); line.appendChild(u);
+      div.appendChild(line);
+      threadsEl.appendChild(div);
+      continue;
+    }
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const located = locateAnchor(t.anchor, clean, ctx);
+    if (!located) {
+      const o = document.createElement("span");
+      o.className = "orphan";
+      o.textContent = "commented text was edited away — was: " +
+        quoted(t.anchor.text, 50);
+      head.appendChild(o);
+    } else {
+      for (const s of segmentsFor(ctx.map, located.idx,
+          located.idx + t.anchor.text.length)) {
+        hlSegs.push({ node: s.node, from: s.from, to: s.to, thread: t.id });
+      }
+      const q = document.createElement("div");
+      q.className = "anchor-quote";
+      q.textContent = quoted(t.anchor.text, 60);
+      q.title = "Click to locate in the document";
+      q.addEventListener("click", () => selectAnchor(t.anchor));
+      head.appendChild(q);
+    }
+    if (selfCheckOK && t.existing) {
+      const r = document.createElement("button");
+      r.className = "resolve-btn"; r.textContent = "Resolve";
+      r.title = "Mark resolved — the thread leaves the next turn";
+      r.addEventListener("click", () => {
+        resolvedLocal.push(t.id);
+        renderThreads(); scheduleSave();
+      });
+      head.appendChild(r);
+    }
+    div.appendChild(head);
+    for (const m of t.messages) {
+      const wrap = document.createElement("div");
+      wrap.className = "msg" + (m.author === "agent" ? " agent" : "");
+      const display = m.author === "agent" ? "Agent" :
+        m.author === "you" ? "You" : m.author;
+      const mh = document.createElement("div");
+      mh.className = "msg-head";
+      const av = document.createElement("span");
+      av.className = "avatar";
+      av.textContent = display[0].toUpperCase();
+      const name = document.createElement("span");
+      name.className = "msg-name";
+      name.textContent = display;
+      mh.appendChild(av); mh.appendChild(name);
+      if (m.outgoingId) {
+        const x = document.createElement("button");
+        x.className = "remove-comment"; x.textContent = "✕";
+        x.title = "Remove (not sent yet)";
+        x.addEventListener("click", () => {
+          outgoing = outgoing.filter((c) => c.id !== m.outgoingId &&
+            c.reply_to !== m.outgoingId);
+          renderThreads(); scheduleSave();
+        });
+        mh.appendChild(x);
+      }
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.textContent = m.body;
+      wrap.appendChild(mh); wrap.appendChild(body);
+      div.appendChild(wrap);
+    }
+    if (selfCheckOK && t.existing) {
+      const row = document.createElement("div"); row.className = "reply-row";
+      const ta = document.createElement("textarea");
+      ta.rows = 1; ta.placeholder = "Reply…";
+      const b = document.createElement("button"); b.textContent = "Reply";
+      b.addEventListener("click", () => {
+        const body = ta.value.trim();
+        if (!body) return;
+        outgoing.push({ id: `c${DATA.turn}-${commentSeq++}`, reply_to: t.id, body });
+        renderThreads(); scheduleSave();
+      });
+      row.appendChild(ta); row.appendChild(b); div.appendChild(row);
+    }
+    threadsEl.appendChild(div);
+  }
+  // Wrap highlights bottom-up: surroundContents splits its text node, so a
+  // later-offset wrap must land before an earlier one in the same node.
+  const nodeStart = new Map(ctx.map.map((e) => [e.node, e.start]));
+  hlSegs.sort((a, b) =>
+    (nodeStart.get(a.node) + a.from) - (nodeStart.get(b.node) + b.from));
+  for (let i = hlSegs.length - 1; i >= 0; i -= 1) {
+    const seg = hlSegs[i];
+    try {
+      const r = document.createRange();
+      r.setStart(seg.node, seg.from);
+      r.setEnd(seg.node, seg.to);
+      const mark = document.createElement("mark");
+      mark.className = "rl-hl";
+      mark.dataset.thread = seg.thread;
+      r.surroundContents(mark);
+    } catch (e) { /* overlapping selections — leave that slice unmarked */ }
+  }
+}
+
+function selectAnchor(anchor) {
+  const ctx = docTextAndMap(clean);
+  const located = locateAnchor(anchor, clean, ctx);
+  if (!located) return;
+  const segs = segmentsFor(ctx.map, located.idx, located.idx + anchor.text.length);
+  if (!segs.length) return;
+  const range = document.createRange();
+  range.setStart(segs[0].node, segs[0].from);
+  range.setEnd(segs[segs.length - 1].node, segs[segs.length - 1].to);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+  segs[0].node.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+renderThreads();
+
+/* ------------------------------------------------------------ send review */
+const modal = document.getElementById("send-modal");
+const statusEl = document.getElementById("send-status");
+let blobJson = "";
+
+/* No dead controls: probe each return channel and drop the ones this
+   embedding blocks; the hint always describes only what remains. Probes are
+   best-effort (neither detector exists everywhere) — the click handlers stay
+   as the last resort. */
+const channels = { copy: true, download: true };
+function refreshSendChannels() {
+  if (!channels.copy) document.getElementById("copy-btn").style.display = "none";
+  if (!channels.download) document.getElementById("download-btn").style.display = "none";
+  document.getElementById("send-hint").textContent =
+    channels.copy && channels.download
+      ? "Copy the review and paste it into the chat — or download it and " +
+        "send the file. Both carry the same review."
+      : channels.copy
+        ? "Copy the review and paste it into the chat."
+        : channels.download
+          ? "The review below is already selected — press Ctrl+C to copy it and " +
+            "paste it into the chat, or download the file and drop it into the chat."
+          : "The review below is already selected — press Ctrl+C to copy it, " +
+            "then paste it into the chat.";
+}
+function dropChannel(name) { channels[name] = false; refreshSendChannels(); }
+refreshSendChannels();
+(async () => {
+  try {
+    const pp = document.permissionsPolicy;
+    if (pp && !pp.allowsFeature("clipboard-write")) {
+      dropChannel("copy");
+    } else if (navigator.permissions && navigator.permissions.query) {
+      const st = await navigator.permissions.query({ name: "clipboard-write" });
+      if (st.state === "denied") dropChannel("copy");
+    }
+    if (pp && pp.features && pp.features().includes("downloads") &&
+        !pp.allowsFeature("downloads")) {
+      dropChannel("download");
+    }
+  } catch (e) { /* cannot probe — the click fallbacks still catch failure */ }
+})();
+
+document.getElementById("send-btn").addEventListener("click", () => {
+  const doc = serialize(clean);
+  blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc),
+    baseChecksum: DATA.checksum, docName: DATA.docName, doc,
+    comments: outgoing, resolved: resolvedLocal });
+  const ta = document.getElementById("send-blob");
+  ta.value = blobJson;
+  statusEl.textContent = "";
+  modal.style.display = "block";
+  // Sandboxes commonly block the clipboard API; the selected textarea is
+  // the primary channel — native copy always works on it.
+  ta.focus(); ta.select();
+});
+document.getElementById("close-modal").addEventListener("click", () => {
+  modal.style.display = "none";
+});
+
+document.getElementById("copy-btn").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(blobJson);
+    statusEl.textContent = "Copied — paste it into the chat.";
+  } catch (e) {
+    dropChannel("copy");
+    statusEl.textContent = "Clipboard is blocked here — the text above is selected: " +
+      "press Ctrl+C, or download the file.";
+    const ta = document.getElementById("send-blob");
+    ta.focus(); ta.select();
+  }
+});
+
+document.getElementById("download-btn").addEventListener("click", () => {
+  try {
+    const blob = new Blob([blobJson], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `review-turn-${DATA.turn}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    statusEl.textContent = "Download requested — if no file appeared, this sandbox " +
+      "blocks downloads: select the text above and copy it instead.";
+  } catch (e) {
+    statusEl.textContent = "Download failed here — select the text above and copy manually.";
+  }
+});
+</script>

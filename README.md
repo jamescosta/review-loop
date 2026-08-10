@@ -14,10 +14,9 @@ Spec of record: Notion page "Review-loop prototype — skill + artifact (design)
   (git plumbing, diffs, blob verification, apply) and
   `scripts/template.html` (the artifact page).
 - `tests/` — guard and normalization tests (`python -m pytest tests`).
-- `sample/` — synthetic sample document, a captured review blob, and
-  `REPLAY.md` with the exact commands to replay a full turn.
+- `sample/doc.md` — synthetic sample document for trying the loop.
 - `proof-run/` — git-ignored working area holding the proof run's own git
-  history (agent commit, review-applied commit, threaded turn 2).
+  history (agent commits, reviewer-applied commits, threaded replies).
 
 ## Install
 
@@ -33,5 +32,5 @@ or invoke it in place by asking Claude Code to follow
 
 ## Running a turn
 
-See `sample/REPLAY.md` for the end-to-end command sequence on the sample
-document.
+`skills/review-loop/SKILL.md` is the complete flow — point a Claude Code
+session at it with a document (start with `sample/doc.md`) and an ask.
