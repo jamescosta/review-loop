@@ -43,7 +43,8 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
    ```
 
    Publish `PROJECT/.review/artifact.html` with the Artifact tool — **the same
-   file path every turn** so the URL stays stable (favicon 🔁, keep the title
+   file path every turn** so the URL stays stable (pass favicon 🔁 to the
+   Artifact tool, and keep the title
    unchanged across turns). The first publish: record the URL in
    `PROJECT/.review/artifact-url.txt`. In a later session, pass that URL as
    the Artifact tool's `url` parameter so the redeploy targets the same page.
@@ -62,7 +63,7 @@ wrong state and bounces.
 ## Applying the review
 
 The reviewer sends the review blob back as pasted JSON or a downloaded file —
-`{turn, checksum, docName, doc, comments, resolved}`. Never edit or interpret its
+`{turn, checksum, baseChecksum, docName, doc, comments, resolved}`. Never edit or interpret its
 contents: the script verifies and applies it. The blob's `docName` names the
 document but not the project folder; if the conversation doesn't establish
 which project, ask rather than guessing. Save a pasted blob to a file

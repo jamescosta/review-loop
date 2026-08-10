@@ -29,8 +29,9 @@ Edit in clean view, select text and comment, then Send review. Copy the
 blob (it is pre-selected in the send dialog) and save it to a file.
 `sample/review-blob.json` is the blob captured in the proof run — it edits
 "Recruit ten" to "Recruit twelve" and comments on "clerk". It only applies
-to a turn whose base matches its checksum (`f5809325`); against any other
-turn it demonstrates the stale-turn / checksum rejections instead.
+to a turn whose base checksum is `35b1eba1` (its `baseChecksum` field);
+against anything else it demonstrates the stale-turn / wrong-base
+rejections instead.
 
 ## 4. Apply the human turn
 

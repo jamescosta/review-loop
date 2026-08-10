@@ -1,6 +1,7 @@
 <title>Review loop — __DOC_TITLE__</title>
 <style>
-  /* Palette appears four times by design: the artifact viewer stamps
+  /* Palette appears four times by design: the claude.ai artifact viewer —
+     the host page embedding this file, not anything in this file — stamps
      data-theme on the root at runtime, and its toggle must override the
      media query in both directions. Keep all four blocks in sync. */
   :root {
@@ -503,7 +504,7 @@ function docTextAndMap(root) {
   return { text: text.replace(NBSP_RE, " "), map };
 }
 
-function pointOffset(container, offset, map, text) {
+function pointOffset(container, offset, map) {
   if (container.nodeType === 3) {
     const entry = map.find((e) => e.node === container);
     return entry ? entry.start + offset : null;
@@ -515,7 +516,19 @@ function pointOffset(container, offset, map, text) {
     const entry = map.find((e) => e.node === target);
     return entry ? entry.start : null;
   }
-  return offset === 0 ? 0 : text.length;
+  // No text node there (boundary past the last child, or a text-less child):
+  // anchor to the container's own first/last text descendant, never to the
+  // document's ends.
+  const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  if (offset === 0) {
+    const first = tw.nextNode();
+    const entry = first && map.find((e) => e.node === first);
+    return entry ? entry.start : null;
+  }
+  let last = null;
+  while (tw.nextNode()) last = tw.currentNode;
+  const entry = last && map.find((e) => e.node === last);
+  return entry ? entry.start + last.nodeValue.length : null;
 }
 
 function locateAnchor(anchor, root, ctx) {
@@ -548,15 +561,9 @@ const noticesEl = document.getElementById("notices");
 const threadsEl = document.getElementById("threads");
 let outgoing = [];          // reviewer-authored comments/replies this turn
 let resolvedLocal = [];     // thread ids the reviewer resolved this turn
-// Seed past this turn's existing thread ids so a new comment or reply can
-// never collide with a thread already in the data.
+// Ids are unique by construction: threads always carry an earlier turn's
+// number than DATA.turn, and apply rejects any collision store-side.
 let commentSeq = 1;
-for (const t of DATA.threads) {
-  const m = /^c(\d+)-(\d+)$/.exec(t.id);
-  if (m && Number(m[1]) === DATA.turn) {
-    commentSeq = Math.max(commentSeq, Number(m[2]) + 1);
-  }
-}
 let storageOK = false;
 const storageKey = `rl-${DATA.checksum}-${DATA.turn}`;
 
@@ -698,8 +705,8 @@ commentBtn.addEventListener("mousedown", (e) => {
   if (!sel || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
   const { text, map } = docTextAndMap(clean);
-  let start = pointOffset(range.startContainer, range.startOffset, map, text);
-  let end = pointOffset(range.endContainer, range.endOffset, map, text);
+  let start = pointOffset(range.startContainer, range.startOffset, map);
+  let end = pointOffset(range.endContainer, range.endOffset, map);
   if (start === null || end === null || start === end) return;
   if (start > end) { const t = start; start = end; end = t; }
   // Trim whitespace off the selection edges so anchors are stable.
@@ -933,14 +940,16 @@ function refreshSendChannels() {
   if (!channels.copy) document.getElementById("copy-btn").style.display = "none";
   if (!channels.download) document.getElementById("download-btn").style.display = "none";
   document.getElementById("send-hint").textContent =
-    !channels.copy && !channels.download
-      ? "The review below is already selected — press Ctrl+C to copy it, then " +
-        "paste it into the chat."
-      : !channels.copy
-        ? "The review below is already selected — press Ctrl+C to copy it and " +
-          "paste it into the chat, or download the file and drop it into the chat."
-        : "Copy the review and paste it into the chat — or download it and " +
-          "send the file. Both carry the same review.";
+    channels.copy && channels.download
+      ? "Copy the review and paste it into the chat — or download it and " +
+        "send the file. Both carry the same review."
+      : channels.copy
+        ? "Copy the review and paste it into the chat."
+        : channels.download
+          ? "The review below is already selected — press Ctrl+C to copy it and " +
+            "paste it into the chat, or download the file and drop it into the chat."
+          : "The review below is already selected — press Ctrl+C to copy it, " +
+            "then paste it into the chat.";
 }
 function dropChannel(name) { channels[name] = false; refreshSendChannels(); }
 refreshSendChannels();
@@ -963,7 +972,8 @@ refreshSendChannels();
 document.getElementById("send-btn").addEventListener("click", () => {
   const doc = serialize(clean);
   blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc),
-    docName: DATA.docName, doc, comments: outgoing, resolved: resolvedLocal });
+    baseChecksum: DATA.checksum, docName: DATA.docName, doc,
+    comments: outgoing, resolved: resolvedLocal });
   const ta = document.getElementById("send-blob");
   ta.value = blobJson;
   statusEl.textContent = "";

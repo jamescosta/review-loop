@@ -204,7 +204,14 @@ def block_diff(old_doc, new_doc):
             while k < min(len(olds), len(news)):
                 o, n = olds[k], news[k]
                 kind = block_kind(o)
-                if kind == block_kind(n) and kind in ("heading", "para"):
+                mergeable = kind == block_kind(n) and kind in ("heading", "para")
+                if mergeable and kind == "heading":
+                    # A level change rewrites the marker token, and the page
+                    # can only re-render a heading whose marker sits in an
+                    # equal run — level changes show as del+ins blocks.
+                    mergeable = (re.match(r"#+", o).group(0) ==
+                                 re.match(r"#+", n).group(0))
+                if mergeable:
                     sm = SequenceMatcher(None, on[i1 + k], nn[j1 + k])
                     if sm.quick_ratio() > 0.5 and sm.ratio() > 0.5:
                         diff.append({"t": "chg", "ops": word_ops(o, n)})
@@ -393,7 +400,7 @@ def parse_blob(raw):
         fail("review blob is not valid JSON — it was likely truncated in transit. "
              "Don't close the artifact tab — send again (use the file download if "
              "pasting keeps truncating).")
-    for field in ("turn", "checksum", "doc", "comments"):
+    for field in ("turn", "checksum", "baseChecksum", "doc", "comments"):
         if field not in blob:
             fail(f"review blob is missing '{field}' — it was likely truncated in "
                  "transit. Don't close the artifact tab — send again.")
@@ -415,6 +422,10 @@ def cmd_apply(args):
     if state["applied"]:
         fail(f"turn {state['turn']} review was already applied — a re-send is refused. "
              "Ask for the next agent pass (or reply to threads) instead.")
+    if blob["baseChecksum"] != state["base_checksum"]:
+        fail("review was built on a different document base than this project's "
+             f"turn {state['turn']} — it belongs to another project or document. "
+             "Open this document's artifact and redo the review there.")
     if fnv1a(blob["doc"]) != blob["checksum"]:
         fail("review blob checksum does not match its document — it was corrupted "
              "or truncated in transit. Don't close the artifact tab — send again "
@@ -448,19 +459,28 @@ def cmd_apply(args):
             if not all(k in a for k in ("text", "occurrence", "before", "after")):
                 fail(f"comment {c.get('id')} has an incomplete anchor — blob "
                      "malformed; send again.")
+            known.add(c["id"])  # a duplicate later in this same blob collides too
 
     # All guards passed: apply the human turn. Any non-equal opcode in the
     # reconstruction means a normalized difference, so the stats are the verdict.
-    result, stats = reconstruct(base, blob["doc"])
+    result, stats = reconstruct(base, to_lf(blob["doc"]))
     edited = any(stats.values())
     ident = reviewer_ident(args.reviewer)
     if edited:
         write_text(doc_path(project, state), result)
     detail = (f"{stats['changed']} changed, {stats['inserted']} inserted, "
               f"{stats['deleted']} deleted block(s)" if edited else "comments only")
-    git(project, "add", "-A", ident=ident)
-    git(project, "commit", "--allow-empty", "-m",
-        f"Turn {state['turn']} (review): {detail}", ident=ident)
+    try:
+        git(project, "add", "-A", ident=ident)
+        git(project, "commit", "--allow-empty", "-m",
+            f"Turn {state['turn']} (review): {detail}", ident=ident)
+    except SystemExit:
+        # A failed commit must not leave the review half-applied: restore the
+        # shipped base and unstage before surfacing the rejection.
+        if edited:
+            write_text(doc_path(project, state), base)
+        subprocess.run(["git", "-C", str(project), "reset"], capture_output=True)
+        raise
 
     for c in blob["comments"]:
         if c.get("reply_to"):

@@ -84,6 +84,13 @@ def test_block_diff_lists_never_word_merge():
     assert [p["t"] for p in d] == ["del", "ins"]
 
 
+def test_block_diff_heading_level_change_never_word_merges():
+    # A level change rewrites the marker token; word-merging it would leave
+    # the changes view unable to re-render the heading.
+    d = loop.block_diff("## Title words here\n", "# Title words here\n")
+    assert [p["t"] for p in d] == ["del", "ins"]
+
+
 def test_reconstruct_ignores_dom_churn_but_applies_edits():
     base = "# Title\n\none  two\nthree\n\n- x\n- y\n"
     returned = "# Title\n\none two three\n\n- x\n- z\n"
@@ -101,8 +108,10 @@ def run(args, cwd=None):
                           capture_output=True, text=True, cwd=cwd)
 
 
-def make_blob(doc, turn, **overrides):
-    blob = {"turn": turn, "checksum": loop.fnv1a(doc), "doc": doc, "comments": []}
+def make_blob(doc, turn, base=None, **overrides):
+    blob = {"turn": turn, "checksum": loop.fnv1a(doc),
+            "baseChecksum": loop.fnv1a(doc if base is None else base),
+            "doc": doc, "comments": []}
     blob.update(overrides)
     return blob
 
@@ -193,8 +202,9 @@ def test_apply_rejects_mid_turn_file_collision(project, tmp_path):
 
 
 def test_apply_happy_path_then_already_applied(project, tmp_path):
-    edited = turn_base(project).replace("improved", "improved and edited by the human")
-    blob = make_blob(edited, turn=1, comments=[
+    base = turn_base(project)
+    edited = base.replace("improved", "improved and edited by the human")
+    blob = make_blob(edited, turn=1, base=base, comments=[
         {"id": "c1-1", "reply_to": None,
          "anchor": {"text": "first paragraph", "occurrence": 0,
                     "before": "", "after": ", improved"},
@@ -271,6 +281,54 @@ def test_apply_rejects_malformed_comment_without_mutating(project, tmp_path):
     assert "unknown thread" in r.stderr
     state = json.loads((project / ".review" / "state.json").read_text())
     assert state["applied"] is False
+
+
+def test_apply_rejects_wrong_base(project, tmp_path):
+    r = apply_blob(project, tmp_path,
+                   make_blob(turn_base(project), turn=1, baseChecksum="deadbeef"))
+    assert r.returncode == 2
+    assert "different document base" in r.stderr
+    state = json.loads((project / ".review" / "state.json").read_text())
+    assert state["applied"] is False
+
+
+def test_apply_rejects_duplicate_comment_ids_in_one_blob(project, tmp_path):
+    anchor = {"text": "first paragraph", "occurrence": 0, "before": "", "after": ""}
+    blob = make_blob(turn_base(project), turn=1, comments=[
+        {"id": "c1-1", "reply_to": None, "anchor": anchor, "body": "one"},
+        {"id": "c1-1", "reply_to": None, "anchor": anchor, "body": "two"}])
+    r = apply_blob(project, tmp_path, blob)
+    assert r.returncode == 2
+    assert "collides" in r.stderr
+
+
+def test_apply_normalizes_crlf_from_blob(project, tmp_path):
+    base = turn_base(project)
+    edited = base.replace("improved", "improved with\r\nan embedded CRLF")
+    r = apply_blob(project, tmp_path, make_blob(edited, turn=1, base=base))
+    assert r.returncode == 0, r.stderr
+    assert b"\r" not in (project / "doc.md").read_bytes()
+
+
+def test_apply_rolls_back_when_commit_fails(project, tmp_path):
+    base = turn_base(project)
+    edited = base.replace("improved", "improved and edited")
+    hook = project / ".git" / "hooks" / "pre-commit"
+    write_lf(hook, "#!/bin/sh\nexit 1\n")
+    r = apply_blob(project, tmp_path, make_blob(edited, turn=1, base=base))
+    assert r.returncode == 2
+    # Nothing half-applied: the file is back to the shipped base, the turn
+    # is still open, and nothing is staged.
+    assert (project / "doc.md").read_text(encoding="utf-8") == base
+    state = json.loads((project / ".review" / "state.json").read_text())
+    assert state["applied"] is False
+    staged = subprocess.run(["git", "-C", str(project), "diff", "--cached", "--name-only"],
+                            capture_output=True, text=True).stdout.strip()
+    assert staged == ""
+    # With the obstacle gone, the same blob applies cleanly.
+    hook.unlink()
+    r = apply_blob(project, tmp_path, make_blob(edited, turn=1, base=base))
+    assert r.returncode == 0, r.stderr
 
 
 def test_lf_discipline_end_to_end(project):
