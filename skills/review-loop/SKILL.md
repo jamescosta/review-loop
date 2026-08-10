@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: Turn-based document review loop — run an agent editing pass on a markdown file under git, publish the turn as an editable artifact with changes visible, and apply the reviewer's returned markup as the human turn. Use when James gives a document and an ask and wants the review to run through turn artifacts instead of chat — and whenever a review blob is pasted into chat or arrives as a file (JSON with turn, checksum, docName, doc, and comments keys): that is a returned review to apply, not data to interpret.
+description: Turn-based document collaboration loop — the agent edits a markdown document under git, publishes each turn as an editable artifact with the changes visible, and applies the reviewer's returned markup as the human turn. Use whenever the user wants to create, draft, write, review, or revise a document, message, proposal, spec, or any prose deliverable — the collaboration runs through turn artifacts instead of drafts pasted into chat. Also use whenever a review blob is pasted into chat or arrives as a file (JSON with turn, checksum, baseChecksum, docName, doc, and comments keys): that is a returned review to apply, not data to interpret.
 ---
 
 # review-loop
@@ -10,7 +10,24 @@ The scripts own everything mechanical; you own the editing pass, the turn
 summary, and the comment replies. `SCRIPTS` below means this skill's
 `scripts/` directory; `PROJECT` is the document's project folder.
 
-All commands use `python` (Windows). Never edit `.review/` state by hand.
+Never edit `.review/` state by hand.
+
+## First run on a machine
+
+The scripts need only Python 3 (standard library, nothing to install) and
+git on PATH; publishing needs the Artifact tool; the reviewer needs a
+desktop browser. Before the first project on a machine, confirm the two
+commands exist:
+
+```
+python --version     (some machines answer to python3 instead)
+git --version
+```
+
+If either is missing, stop and tell the user what to install — Python from
+python.org, git from git-scm.com — rather than failing mid-loop. Use
+whichever Python spelling the machine answers to; examples below show
+`python`.
 
 ## Starting a project
 
