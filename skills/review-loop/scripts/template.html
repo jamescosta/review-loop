@@ -62,10 +62,13 @@
   .notice.warn { background: var(--warn-bg); color: var(--warn-fg); }
   .notice.danger { background: var(--danger-bg); color: var(--danger-fg); }
   .notice button { margin-left: .6rem; font-size: .78rem; padding: .15rem .5rem; }
-  main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem;
-    padding: 1.2rem 1.5rem 4rem; align-items: start; }
-  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
-  .doc { max-width: 72ch; min-height: 8rem; }
+  /* The doc column is sized to the text measure rather than to whatever is left
+     over, so the pair sits centered with no dead band between prose and comments. */
+  main { --measure: 72ch; display: grid; justify-content: center; align-items: start;
+    grid-template-columns: minmax(0, var(--measure)) 300px; gap: 2rem;
+    padding: 1.2rem 1.5rem 4rem; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, var(--measure)); } }
+  .doc { min-height: 8rem; }
   .doc:focus-visible { outline: none; }
   #clean[contenteditable="true"] { border-left: 3px solid transparent; padding-left: .8rem; }
   #clean[contenteditable="true"]:focus-within { border-left-color: var(--accent); }
@@ -83,8 +86,9 @@
     text-decoration: line-through; }
   .ins-block, .del-block { display: block; padding: .1rem .5rem; border-radius: 4px; }
   .changes-note { color: var(--muted); font-size: .82rem; font-style: italic; }
-  aside { font-size: .87rem; position: sticky; top: 3.4rem;
-    max-height: calc(100vh - 5rem); overflow-y: auto; }
+  /* Comments ride the page scroll — a scroll container here put a second
+     scrollbar next to the first and detached the threads from the text. */
+  aside { font-size: .87rem; }
   .thread, #comment-form { background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; padding: .7rem .85rem; margin-bottom: .7rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
