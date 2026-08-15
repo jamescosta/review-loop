@@ -311,16 +311,19 @@ def nearest_existing_dir(path):
     return p
 
 
-def inside_work_tree(path):
+def inside_repository(path):
     # git's messages are gettext-translated, and the fallback below reads one.
     # git's own test suite pins LANG/LC_ALL to C for that reason; so does this,
     # or a translated locale turns every plain folder into an unreadable answer.
     env = os.environ.copy()
     env.update(LANG="C", LC_ALL="C")
-    r = subprocess.run(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+    r = subprocess.run(["git", "-C", str(path), "rev-parse",
+                        "--is-inside-work-tree", "--is-inside-git-dir"],
                        env=env, capture_output=True, text=True)
     if r.returncode == 0:
-        return r.stdout.strip() == "true"
+        # A bare repository and a .git directory both answer work-tree=false,
+        # so either predicate alone lets one of them through.
+        return "true" in r.stdout.split()
     # Exit 128 covers both "no repository here" — the ordinary answer — and a
     # repository git refuses to read (dubious ownership, damaged .git). Only
     # the first is a clean no; anything else stops rather than waving init on.
@@ -337,7 +340,7 @@ def refuse_nested_project(project):
     if (review_dir(project) / "state.json").exists():
         return
     host = nearest_existing_dir(project)
-    if inside_work_tree(host):
+    if inside_repository(host):
         fail(f"{host} is inside a git repository, so a review-loop project cannot "
              "live there: the loop commits with `git add -A`, which at a "
              "repository's root sweeps that repository's uncommitted work into the "
@@ -356,7 +359,12 @@ def cmd_init(args):
     if not src.exists():
         fail(f"document {src} does not exist")
     doc_name = src.name
-    write_text(project / doc_name, to_lf(read_text(src)))
+    dest = project / doc_name
+    if dest.resolve() == src.resolve():
+        fail(f"{src} already sits in {project}, so importing it would rewrite the "
+             "original in place rather than copy it. Give the project a folder of "
+             "its own, e.g. ~/Documents/review-loop/<doc-slug>/.")
+    write_text(dest, to_lf(read_text(src)))
 
     if not (project / ".git").exists():
         git(project, "init", "-b", "main")

@@ -162,6 +162,35 @@ def test_init_refuses_to_nest_inside_a_git_repo(tmp_path):
     assert not (host / "nested").exists()  # refused before anything was created
 
 
+def test_init_refuses_a_bare_repository(tmp_path):
+    # A bare repo answers --is-inside-work-tree=false; only --is-inside-git-dir
+    # catches it, and writing a project into one corrupts the repository.
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", bare / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    assert not (bare / "proj").exists()
+
+
+def test_init_refuses_to_import_a_document_onto_itself(tmp_path):
+    # Project == the document's own folder: the import would rewrite the
+    # original through to_lf() instead of copying it.
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    src = docs / "doc.md"
+    with open(src, "wb") as f:  # CRLF, no trailing newline — to_lf would change both
+        f.write(b"# Sample\r\n\r\nfirst paragraph")
+    before = src.read_bytes()
+    r = run(["init", docs, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "rewrite the original in place" in r.stderr
+    assert src.read_bytes() == before  # the user's file is untouched
+
+
 def test_init_reinits_an_existing_project(project, tmp_path):
     # The project is itself a git repo; the nesting guard must not fire on it.
     r = run(["init", project, "--doc", tmp_path / "doc.md",
