@@ -191,6 +191,21 @@ def test_init_refuses_to_import_a_document_onto_itself(tmp_path):
     assert src.read_bytes() == before  # the user's file is untouched
 
 
+def test_init_refuses_a_damaged_repository_marker(tmp_path):
+    # A .git file pointing at a missing gitdir draws a different "not a git
+    # repository" message; reading it as a clean no would nest the project
+    # inside a repository that is merely broken.
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    write_lf(broken / ".git", "gitdir: /nonexistent/path/to/gitdir\n")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", broken / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "could not tell whether" in r.stderr
+    assert not (broken / "proj").exists()
+
+
 def test_init_reinits_an_existing_project(project, tmp_path):
     # The project is itself a git repo; the nesting guard must not fire on it.
     r = run(["init", project, "--doc", tmp_path / "doc.md",

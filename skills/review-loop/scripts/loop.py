@@ -325,9 +325,12 @@ def inside_repository(path):
         # so either predicate alone lets one of them through.
         return "true" in r.stdout.split()
     # Exit 128 covers both "no repository here" — the ordinary answer — and a
-    # repository git refuses to read (dubious ownership, damaged .git). Only
-    # the first is a clean no; anything else stops rather than waving init on.
-    if "not a git repository" in r.stderr.lower():
+    # repository git refuses to read (dubious ownership, a .git marker pointing
+    # at a missing gitdir). Only the first is a clean no, and only the parenthesis
+    # tells them apart: a damaged marker reports "not a git repository: <gitdir>"
+    # against the plain folder's "(or any of the parent directories)". Anything
+    # unrecognized stops rather than waving init on.
+    if "not a git repository (or any of the parent directories)" in r.stderr.lower():
         return False
     fail(f"could not tell whether {path} sits inside a git repository: "
          f"{r.stderr.strip()}")
