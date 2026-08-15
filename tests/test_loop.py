@@ -328,6 +328,27 @@ def test_init_succeeds_below_a_filesystem_boundary():
         shutil.rmtree(area, ignore_errors=True)
 
 
+def test_init_replaces_a_hard_linked_destination(tmp_path):
+    # A hard link at the destination is a second name for a file outside the
+    # project; writing in place would truncate it under both names.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.link(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("filesystem does not support hard links")
+    srcdir = tmp_path / "srcdir"
+    srcdir.mkdir()
+    src = srcdir / "doc.md"
+    write_lf(src, "# Sample\n\nimported paragraph\n")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+    assert external.read_text(encoding="utf-8") == "external content\n"
+    assert "imported paragraph" in (proj / "doc.md").read_text(encoding="utf-8")
+
+
 def test_init_reinits_an_existing_project(project, tmp_path):
     # The project is itself a git repo; the nesting guard must not fire on it.
     r = run(["init", project, "--doc", tmp_path / "doc.md",

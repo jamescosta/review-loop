@@ -395,9 +395,11 @@ def cmd_init(args):
     # Read before touching the destination: a source that cannot be decoded
     # raises here, and a rejected import must leave the project as it found it.
     content = to_lf(read_text(src))
-    # Import into the project, never through an alias: writing to a symlinked
-    # destination would truncate whatever it points at, outside the project.
-    if dest.is_symlink():
+    # Replace the destination entry rather than writing through it: a symlink or
+    # a hard link there reaches a file outside the project, and opening it in
+    # place would truncate that file. The check above has already refused the one
+    # entry that must not be removed — the source itself.
+    if dest.is_symlink() or dest.is_file():
         dest.unlink()
     write_text(dest, content)
 
