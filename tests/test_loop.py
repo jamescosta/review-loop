@@ -146,6 +146,29 @@ def project(tmp_path):
     return proj
 
 
+def test_init_refuses_to_nest_inside_a_git_repo(tmp_path):
+    # The loop's `git add -A` must never reach a host repository's work.
+    host = tmp_path / "host"
+    host.mkdir()
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    proj = host / "nested" / "proj"
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    assert "~/Documents/review-loop" in r.stderr  # the recovery
+    assert not (host / "nested").exists()  # refused before anything was created
+
+
+def test_init_reinits_an_existing_project(project, tmp_path):
+    # The project is itself a git repo; the nesting guard must not fire on it.
+    r = run(["init", project, "--doc", tmp_path / "doc.md",
+             "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+
+
 def test_agent_commit_identity_and_state(project):
     log = subprocess.run(["git", "-C", str(project), "log", "--format=%an|%s"],
                          capture_output=True, text=True).stdout.strip().split("\n")

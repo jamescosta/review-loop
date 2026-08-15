@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """review-loop plumbing: git setup, turn state, diffs, blob verification, apply.
 
 Everything mechanical in the loop lives here; SKILL.md drives the agent's
@@ -302,10 +302,50 @@ def reviewer_ident(name):
     return (name, f"{slug}@review-loop.local")
 
 
+def nearest_existing_dir(path):
+    p = Path(path).resolve()
+    while not p.is_dir():
+        if p.parent == p:
+            return p
+        p = p.parent
+    return p
+
+
+def inside_work_tree(path):
+    r = subprocess.run(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        return r.stdout.strip() == "true"
+    # Exit 128 covers both "no repository here" — the ordinary answer — and a
+    # repository git refuses to read (dubious ownership, damaged .git). Only
+    # the first is a clean no; anything else stops rather than waving init on.
+    if "not a git repository" in r.stderr.lower():
+        return False
+    fail(f"could not tell whether {path} sits inside a git repository: "
+         f"{r.stderr.strip()}")
+
+
+def refuse_nested_project(project):
+    """Every turn commits with `git add -A`, so a project pointed at another
+    repository's root sweeps that repository's uncommitted work into the
+    document's history. An existing review-loop project re-inits normally."""
+    if (review_dir(project) / "state.json").exists():
+        return
+    host = nearest_existing_dir(project)
+    if inside_work_tree(host):
+        fail(f"{host} is inside a git repository, so a review-loop project cannot "
+             "live there: the loop commits with `git add -A`, which at a "
+             "repository's root sweeps that repository's uncommitted work into the "
+             "document's history, and below one buries a second repository inside "
+             "the first. Nothing was created — pick a folder outside any "
+             "repository, e.g. ~/Documents/review-loop/<doc-slug>/.")
+
+
 # ------------------------------------------------------------ subcommands
 
 def cmd_init(args):
     project = Path(args.project)
+    refuse_nested_project(project)  # before anything is created on disk
     project.mkdir(parents=True, exist_ok=True)
     src = Path(args.doc)
     if not src.exists():
