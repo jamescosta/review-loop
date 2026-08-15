@@ -59,7 +59,11 @@ def fnv1a(text):
 # split_blocks / block_kind / normalize are mirrored in template.html; the
 # two implementations must stay identical or the round-trip check lies.
 
-HEADING_LINE = re.compile(r"^#{1,6}\s")
+# Spelled out rather than \s: the two runtimes disagree on which exotic
+# characters that class covers, and a heading needs content to survive the
+# round trip — the page renders an empty heading to an element the
+# serializer drops.
+HEADING_LINE = re.compile(r"^#{1,6}[ \t]+[^ \t]")
 LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
 
 

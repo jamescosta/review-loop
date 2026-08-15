@@ -67,6 +67,25 @@ def test_split_blocks_splits_only_on_block_kind_headings():
     assert loop.block_kind(doc) == "para"
 
 
+def test_split_blocks_needs_content_after_the_heading_marker():
+    # A marker with nothing after it renders to an empty element the page's
+    # serializer drops, which would fail the round-trip check; it stays text.
+    assert loop.split_blocks("intro\n# \nbody") == ["intro\n# \nbody"]
+    assert loop.split_blocks("intro\n#  \nbody") == ["intro\n#  \nbody"]
+    assert loop.split_blocks("intro\n#\tTabbed\nbody") == [
+        "intro", "#\tTabbed", "body"]
+
+
+def test_heading_separator_is_the_same_class_in_both_runtimes():
+    # \s covers U+0085 and U+001C in Python but not in JS, and U+FEFF in JS
+    # but not in Python; the marker takes a space or tab so the mirrors agree.
+    for sep in ("", "", "﻿", " ", " "):
+        doc = "intro\n#%sTitle\nbody" % sep
+        assert loop.split_blocks(doc) == [doc], sep
+    assert loop.split_blocks("intro\n# Title\nbody") == [
+        "intro", "# Title", "body"]
+
+
 def test_split_blocks_ignores_heading_lines_inside_fences():
     assert loop.split_blocks("```\n# fenced\n```\n# after") == [
         "```\n# fenced\n```", "# after"]

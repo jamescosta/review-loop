@@ -210,7 +210,10 @@ function fnv1a(str) {
    splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
    drift, the round-trip self-check reports false mismatches. */
 const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
-const HEADING_LINE = /^#{1,6}\s/;
+// Spelled out rather than \s: the two runtimes disagree on which exotic
+// characters that class covers, and a heading needs content to survive the
+// round trip — an empty heading renders to an element the serializer drops.
+const HEADING_LINE = /^#{1,6}[ \t]+[^ \t]/;
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
 
 function splitBlocks(doc) {
