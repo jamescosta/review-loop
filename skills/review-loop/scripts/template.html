@@ -652,6 +652,11 @@ function locateAnchor(anchor, root, ctx) {
   for (let i = text.indexOf(anchor.text); i >= 0;
        i = text.indexOf(anchor.text, i + 1)) hits.push(i);
   if (!hits.length) return null;
+  // A lone occurrence wins whatever its context now reads: there is no second
+  // instance to confuse it with, so context has nothing left to decide, and
+  // withholding it would orphan a thread whose commented text is sitting
+  // there untouched.
+  if (hits.length === 1) return { idx: hits[0], map: ctx.map };
 
   let best = 0; const winners = [];
   for (let k = 0; k < hits.length; k += 1) {
