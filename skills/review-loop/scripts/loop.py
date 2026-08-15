@@ -312,8 +312,13 @@ def nearest_existing_dir(path):
 
 
 def inside_work_tree(path):
+    # git's messages are gettext-translated, and the fallback below reads one.
+    # git's own test suite pins LANG/LC_ALL to C for that reason; so does this,
+    # or a translated locale turns every plain folder into an unreadable answer.
+    env = os.environ.copy()
+    env.update(LANG="C", LC_ALL="C")
     r = subprocess.run(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
-                       capture_output=True, text=True)
+                       env=env, capture_output=True, text=True)
     if r.returncode == 0:
         return r.stdout.strip() == "true"
     # Exit 128 covers both "no repository here" — the ordinary answer — and a
