@@ -336,11 +336,24 @@ def inside_repository(path):
          f"{r.stderr.strip()}")
 
 
+def is_review_loop_project(project):
+    """The re-init exemption. A directory that merely contains a
+    .review/state.json is not a project: the state must be readable and name a
+    document that is actually here, or a stray or half-written file hands a
+    user's own repository to `git add -A`."""
+    try:
+        state = json.loads(read_text(review_dir(project) / "state.json"))
+    except (OSError, ValueError):
+        return False
+    doc = state.get("doc") if isinstance(state, dict) else None
+    return bool(doc) and (project / doc).is_file()
+
+
 def refuse_nested_project(project):
     """Every turn commits with `git add -A`, so a project pointed at another
     repository's root sweeps that repository's uncommitted work into the
     document's history. An existing review-loop project re-inits normally."""
-    if (review_dir(project) / "state.json").exists():
+    if is_review_loop_project(project):
         return
     host = nearest_existing_dir(project)
     if inside_repository(host):
@@ -363,8 +376,10 @@ def cmd_init(args):
         fail(f"document {src} does not exist")
     doc_name = src.name
     dest = project / doc_name
-    if dest.resolve() == src.resolve():
-        fail(f"{src} already sits in {project}, so importing it would rewrite the "
+    # samefile, not path equality: a hard link reaches the same bytes under a
+    # second name, and opening it for writing truncates the user's original.
+    if dest.exists() and dest.samefile(src):
+        fail(f"{src} and {dest} are the same file, so importing would rewrite the "
              "original in place rather than copy it. Give the project a folder of "
              "its own, e.g. ~/Documents/review-loop/<doc-slug>/.")
     write_text(dest, to_lf(read_text(src)))

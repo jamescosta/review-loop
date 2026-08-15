@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -204,6 +205,45 @@ def test_init_refuses_a_damaged_repository_marker(tmp_path):
     assert r.returncode == 2
     assert "could not tell whether" in r.stderr
     assert not (broken / "proj").exists()
+
+
+def test_init_refuses_a_repository_with_a_stray_state_file(tmp_path):
+    # The re-init exemption must not be claimable by a stray or half-written
+    # state file: the host's own uncommitted work would be swept into the
+    # import commit.
+    host = tmp_path / "host"
+    host.mkdir()
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    (host / ".review").mkdir()
+    write_lf(host / ".review" / "state.json", "{}\n")
+    write_lf(host / "app.py", "print('work in progress')\n")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", host, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    log = subprocess.run(["git", "-C", str(host), "log", "--oneline"],
+                         capture_output=True, text=True)
+    assert log.stdout.strip() == ""  # nothing of the host's was committed
+
+
+def test_init_refuses_a_hard_linked_source(tmp_path):
+    # Two paths, one inode: path equality misses it and the import would
+    # truncate the user's original through the shared file.
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.link(src, proj / "doc.md")
+    except OSError:
+        pytest.skip("filesystem does not support hard links")
+    before = src.read_bytes()
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "rewrite the original in place" in r.stderr
+    assert src.read_bytes() == before
 
 
 def test_init_reinits_an_existing_project(project, tmp_path):
