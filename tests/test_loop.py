@@ -68,22 +68,25 @@ def test_split_blocks_splits_only_on_block_kind_headings():
 
 
 def test_split_blocks_needs_content_after_the_heading_marker():
-    # A marker with nothing after it renders to an empty element the page's
-    # serializer drops, which would fail the round-trip check; it stays text.
-    assert loop.split_blocks("intro\n# \nbody") == ["intro\n# \nbody"]
-    assert loop.split_blocks("intro\n#  \nbody") == ["intro\n#  \nbody"]
-    assert loop.split_blocks("intro\n#\tTabbed\nbody") == [
-        "intro", "#\tTabbed", "body"]
+    # A marker with nothing visible after it renders to an empty element the
+    # page's serializer drops, which would fail the round-trip check. nbsp
+    # counts as separator, not content: the renderer strips it too.
+    for blank in ("# ", "#  ", "# \xa0", "#\xa0", "#\xa0\xa0", "#\t"):
+        assert loop.split_blocks("intro\n%s\nbody" % blank) == [
+            "intro\n%s\nbody" % blank], blank
+    # A separator run of any of them still opens a heading with real content.
+    for marker in ("# Title", "#\tTitle", "#\xa0Title", "# \xa0Title"):
+        assert loop.split_blocks("intro\n%s\nbody" % marker) == [
+            "intro", marker, "body"], marker
 
 
 def test_heading_separator_is_the_same_class_in_both_runtimes():
-    # \s covers U+0085 and U+001C in Python but not in JS, and U+FEFF in JS
-    # but not in Python; the marker takes a space or tab so the mirrors agree.
-    for sep in ("", "", "﻿", " ", " "):
+    # \s covers U+0085 and U+001C-U+001F in Python but not in JS, and
+    # U+FEFF and U+2028 in JS but not in Python. The separator is spelled
+    # out instead, so no character's membership depends on the runtime.
+    for sep in ("\x85", "\x1c", "\ufeff", "\u2028", "\u3000"):
         doc = "intro\n#%sTitle\nbody" % sep
-        assert loop.split_blocks(doc) == [doc], sep
-    assert loop.split_blocks("intro\n# Title\nbody") == [
-        "intro", "# Title", "body"]
+        assert loop.split_blocks(doc) == [doc], repr(sep)
 
 
 def test_split_blocks_ignores_heading_lines_inside_fences():

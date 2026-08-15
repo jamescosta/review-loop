@@ -60,10 +60,11 @@ def fnv1a(text):
 # two implementations must stay identical or the round-trip check lies.
 
 # Spelled out rather than \s: the two runtimes disagree on which exotic
-# characters that class covers, and a heading needs content to survive the
-# round trip — the page renders an empty heading to an element the
-# serializer drops.
-HEADING_LINE = re.compile(r"^#{1,6}[ \t]+[^ \t]")
+# characters that class covers. The separator is the set normalize folds to
+# a space and the page's renderer strips, and content must be something
+# outside it — a heading that renders empty is an element the serializer
+# drops, which fails the page's round-trip check.
+HEADING_LINE = re.compile(r"^#{1,6}[ \t\xa0]+[^ \t\xa0]")
 LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
 
 

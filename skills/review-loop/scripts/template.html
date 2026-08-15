@@ -211,9 +211,11 @@ function fnv1a(str) {
    drift, the round-trip self-check reports false mismatches. */
 const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
 // Spelled out rather than \s: the two runtimes disagree on which exotic
-// characters that class covers, and a heading needs content to survive the
-// round trip — an empty heading renders to an element the serializer drops.
-const HEADING_LINE = /^#{1,6}[ \t]+[^ \t]/;
+// characters that class covers. The separator is the set normalize folds to
+// a space and renderBlock strips, and content must be something outside it —
+// a heading that renders empty is an element the serializer drops, which
+// fails the round-trip check.
+const HEADING_LINE = /^#{1,6}[ \t\u00a0]+[^ \t\u00a0]/;
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
 
 function splitBlocks(doc) {
