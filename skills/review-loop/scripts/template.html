@@ -361,17 +361,66 @@ function renderMarkdown(md, container) {
   for (const b of splitBlocks(md)) renderBlock(b, container);
 }
 
-/* ------------------------------------------------------------ serializer
-   The single serializer: editable DOM back to markdown, covering exactly
-   the rendered subset. Inverse of the renderer over that subset. */
+/* -------------------------------------------------------- DOM canonical form
+   What the editable DOM does that markdown has no notion of, canonicalized
+   in one pass over a detached clone so the serializer below reads straight
+   through: nbsp becomes a plain space, a BR becomes the newline it stands
+   for, and a DIV wrapping block elements is flattened away. PRE and CODE
+   subtrees are left alone — the serializer emits their text verbatim, so
+   rewriting inside them would rewrite the markdown. */
 const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
   "UL", "OL", "PRE"]);
+const VERBATIM_TAGS = new Set(["PRE", "CODE"]);
 
+function hasBlockChild(el) {
+  return Array.from(el.children).some((c) => BLOCK_TAGS.has(c.tagName));
+}
+
+function flattenDiv(div) {
+  // Each inline run becomes a block of its own first: hoisted as loose
+  // nodes they would instead join a run of the parent's and merge with it.
+  let run = [];
+  const wrapRun = () => {
+    if (!run.length) return;
+    const p = document.createElement("p");
+    div.insertBefore(p, run[0]);
+    for (const n of run) p.appendChild(n);
+    run = [];
+  };
+  for (const node of Array.from(div.childNodes)) {
+    if (node.nodeType === 1 && BLOCK_TAGS.has(node.tagName)) wrapRun();
+    else run.push(node);
+  }
+  wrapRun();
+  const parent = div.parentNode;
+  while (div.firstChild) parent.insertBefore(div.firstChild, div);
+  parent.removeChild(div);
+}
+
+function canonicalize(el) {
+  // Depth first, so a flattened DIV only ever hands its parent nodes that
+  // are already canonical.
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === 3) {
+      node.nodeValue = node.nodeValue.replace(NBSP_RE, " ");
+    } else if (node.nodeType !== 1) {
+      continue;
+    } else if (node.tagName === "BR") {
+      el.replaceChild(document.createTextNode("\n"), node);
+    } else if (!VERBATIM_TAGS.has(node.tagName)) {
+      canonicalize(node);
+      if (node.tagName === "DIV" && hasBlockChild(node)) flattenDiv(node);
+    }
+  }
+}
+
+/* ------------------------------------------------------------ serializer
+   The single serializer: canonicalized DOM back to markdown, covering
+   exactly the rendered subset. Inverse of the renderer over that subset. */
 function serializeInline(node) {
-  if (node.nodeType === 3) return node.nodeValue.replace(NBSP_RE, " ");
+  if (node.nodeType === 3) return node.nodeValue;
   if (node.nodeType !== 1) return "";
   const tag = node.tagName;
-  if (tag === "BR") return "\n";
   const inner = Array.from(node.childNodes).map(serializeInline).join("");
   if (tag === "STRONG" || tag === "B") return inner ? "**" + inner + "**" : "";
   if (tag === "EM" || tag === "I") return inner ? "*" + inner + "*" : "";
@@ -422,9 +471,6 @@ function serializeContainer(root, blocks) {
       } else if (tag === "PRE") {
         const lang = node.dataset.lang || "";
         blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
-      } else if (tag === "DIV" &&
-          Array.from(node.children).some((c) => BLOCK_TAGS.has(c.tagName))) {
-        serializeContainer(node, blocks);
       } else {
         const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
         if (t) blocks.push(t);
@@ -435,8 +481,10 @@ function serializeContainer(root, blocks) {
 }
 
 function serialize(root) {
+  const clone = root.cloneNode(true);
+  canonicalize(clone);
   const blocks = [];
-  serializeContainer(root, blocks);
+  serializeContainer(clone, blocks);
   return blocks.join("\n\n") + "\n";
 }
 
