@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import namedtuple
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from html import escape
@@ -181,25 +182,42 @@ def word_ops(old, new):
     return ops
 
 
+# -------------------------------------------------------- block alignment
+# The agent turn (block_diff) and the human turn (reconstruct) read the same
+# alignment, so a changed block has one definition rather than two that drift.
+
+AlignedOp = namedtuple("AlignedOp", "tag old new old_norm new_norm")
+
+
+def align_blocks(old_doc, new_doc):
+    """Match two documents block-wise on their normalized text, yielding one
+    AlignedOp per opcode: the raw blocks it covers (what a turn carries)
+    alongside the normalized text the match ran on."""
+    old, new = split_blocks(old_doc), split_blocks(new_doc)
+    old_norm = [normalize(b) for b in old]
+    new_norm = [normalize(b) for b in new]
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_norm,
+                                               new_norm).get_opcodes():
+        yield AlignedOp(tag, old[i1:i2], new[j1:j2],
+                        old_norm[i1:i2], new_norm[j1:j2])
+
+
 def block_diff(old_doc, new_doc):
     """Skill-computed diff for changes view: block ops, word ops within
     changed block pairs of the same kind."""
-    ob, nb = split_blocks(old_doc), split_blocks(new_doc)
-    on = [normalize(x) for x in ob]
-    nn = [normalize(x) for x in nb]
     diff = []
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, on, nn).get_opcodes():
-        if tag == "equal":
-            diff += [{"t": "eq", "md": x} for x in nb[j1:j2]]
-        elif tag == "delete":
-            diff += [{"t": "del", "md": x} for x in ob[i1:i2]]
-        elif tag == "insert":
-            diff += [{"t": "ins", "md": x} for x in nb[j1:j2]]
+    for op in align_blocks(old_doc, new_doc):
+        if op.tag == "equal":
+            diff += [{"t": "eq", "md": x} for x in op.new]
+        elif op.tag == "delete":
+            diff += [{"t": "del", "md": x} for x in op.old]
+        elif op.tag == "insert":
+            diff += [{"t": "ins", "md": x} for x in op.new]
         else:
             # Pair replaced blocks in order, word-merging only similar
             # heading/para pairs (markers can't break their structure);
             # everything else falls back to del+ins blocks.
-            olds, news = ob[i1:i2], nb[j1:j2]
+            olds, news = op.old, op.new
             k = 0
             while k < min(len(olds), len(news)):
                 o, n = olds[k], news[k]
@@ -212,7 +230,7 @@ def block_diff(old_doc, new_doc):
                     mergeable = (re.match(r"#+", o).group(0) ==
                                  re.match(r"#+", n).group(0))
                 if mergeable:
-                    sm = SequenceMatcher(None, on[i1 + k], nn[j1 + k])
+                    sm = SequenceMatcher(None, op.old_norm[k], op.new_norm[k])
                     if sm.quick_ratio() > 0.5 and sm.ratio() > 0.5:
                         diff.append({"t": "chg", "ops": word_ops(o, n)})
                         k += 1
@@ -229,22 +247,19 @@ def reconstruct(base_doc, returned_doc):
     """The human turn: diff returned markdown against the shipped base.
     Equal-normalized blocks keep the base's raw text (DOM churn is not an
     edit); changed/inserted blocks take the returned text."""
-    bb, rb = split_blocks(base_doc), split_blocks(returned_doc)
-    bn = [normalize(x) for x in bb]
-    rn = [normalize(x) for x in rb]
     out = []
     stats = {"changed": 0, "inserted": 0, "deleted": 0}
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, bn, rn).get_opcodes():
-        if tag == "equal":
-            out += bb[i1:i2]
-        elif tag == "delete":
-            stats["deleted"] += i2 - i1
-        elif tag == "insert":
-            out += rb[j1:j2]
-            stats["inserted"] += j2 - j1
+    for op in align_blocks(base_doc, returned_doc):
+        if op.tag == "equal":
+            out += op.old
+        elif op.tag == "delete":
+            stats["deleted"] += len(op.old)
+        elif op.tag == "insert":
+            out += op.new
+            stats["inserted"] += len(op.new)
         else:
-            out += rb[j1:j2]
-            stats["changed"] += max(i2 - i1, j2 - j1)
+            out += op.new
+            stats["changed"] += max(len(op.old), len(op.new))
     return "\n\n".join(out) + "\n", stats
 
 

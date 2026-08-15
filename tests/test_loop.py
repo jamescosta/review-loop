@@ -65,6 +65,19 @@ def test_fnv1a_known_values():
 
 # ------------------------------------------------------------- diffs
 
+def test_align_blocks_pairs_raw_blocks_with_the_matched_text():
+    # The single alignment both turn directions read: blocks match on their
+    # normalized text while each side keeps its raw text.
+    old = "# T\n\nalpha  beta\n\ndropped\n"
+    new = "# T\n\nalpha beta\n\nalpha gamma\n"
+    ops = list(loop.align_blocks(old, new))
+    assert [(o.tag, o.old, o.new) for o in ops] == [
+        ("equal", ["# T", "alpha  beta"], ["# T", "alpha beta"]),
+        ("replace", ["dropped"], ["alpha gamma"]),
+    ]
+    assert ops[0].old_norm == ["# T", "alpha beta"]
+
+
 def test_block_diff_shapes():
     old = "# T\n\nalpha beta gamma\n\n- a\n- b\n"
     new = "# T\n\nalpha BETA gamma\n\nnew para\n\n- a\n- b\n"
