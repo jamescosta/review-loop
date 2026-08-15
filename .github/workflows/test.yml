@@ -16,3 +16,17 @@ jobs:
           python-version: '3.12'
       - run: pip install pytest
       - run: python -m pytest tests
+
+  matcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: node tests/matcher/check.js
+      - run: node tests/matcher/drift.js
+      - run: python tests/matcher/mutate.py
