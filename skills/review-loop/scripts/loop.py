@@ -315,13 +315,13 @@ def inside_repository(path):
     # git's messages are gettext-translated, and the fallback below reads one.
     # git's own test suite pins LANG/LC_ALL to C for that reason; so does this,
     # or a translated locale turns every plain folder into an unreadable answer.
-    env = os.environ.copy()
+    # Every GIT_* variable goes, not a list of the known-dangerous ones: a
+    # ceiling, a redirected GIT_DIR, GIT_OBJECT_DIRECTORY and GIT_COMMON_DIR
+    # each hide the repository this probe exists to find, and an allowlist only
+    # ever names the ones already discovered. Answering "what is at this path"
+    # needs no git configuration at all.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(LANG="C", LC_ALL="C")
-    # Discovery overrides inherited from the caller can hide the very repository
-    # this probe exists to find: a ceiling stops the upward walk before reaching
-    # it, and GIT_DIR/GIT_WORK_TREE answer about somewhere else entirely.
-    for var in ("GIT_CEILING_DIRECTORIES", "GIT_DIR", "GIT_WORK_TREE"):
-        env.pop(var, None)
     r = subprocess.run(["git", "-C", str(path), "rev-parse",
                         "--is-inside-work-tree", "--is-inside-git-dir"],
                        env=env, capture_output=True, text=True)
@@ -387,11 +387,14 @@ def cmd_init(args):
         fail(f"{src} and {dest} are the same file, so importing would rewrite the "
              "original in place rather than copy it. Give the project a folder of "
              "its own, e.g. ~/Documents/review-loop/<doc-slug>/.")
+    # Read before touching the destination: a source that cannot be decoded
+    # raises here, and a rejected import must leave the project as it found it.
+    content = to_lf(read_text(src))
     # Import into the project, never through an alias: writing to a symlinked
     # destination would truncate whatever it points at, outside the project.
     if dest.is_symlink():
         dest.unlink()
-    write_text(dest, to_lf(read_text(src)))
+    write_text(dest, content)
 
     if not (project / ".git").exists():
         git(project, "init", "-b", "main")

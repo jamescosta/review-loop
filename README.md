@@ -24,18 +24,20 @@ The skill is not installed anywhere by default. To use it from Claude Code,
 copy the folder into your user skills directory:
 
 ```
+mkdir -p ~/.claude/skills
 rm -rf ~/.claude/skills/review-loop
 cp -R skills/review-loop ~/.claude/skills/review-loop
 ```
 
 ```
-Remove-Item -Recurse -Force $env:USERPROFILE\.claude\skills\review-loop
+New-Item -ItemType Directory -Force $env:USERPROFILE\.claude\skills | Out-Null
+Remove-Item -Recurse -Force $env:USERPROFILE\.claude\skills\review-loop -ErrorAction SilentlyContinue
 Copy-Item -Recurse skills\review-loop $env:USERPROFILE\.claude\skills\review-loop
 ```
 
-Both copy onto an existing install rather than into it — without the removal
-they nest a second `review-loop/` inside the first and leave the stale skill in
-place.
+Each line earns its place: the copy cannot create a missing `skills/` parent, and
+it copies onto an existing install rather than into it — without the removal it
+nests a second `review-loop/` inside the first and leaves the stale skill live.
 
 or invoke it in place by asking Claude Code to follow
 `skills/review-loop/SKILL.md` on a document.

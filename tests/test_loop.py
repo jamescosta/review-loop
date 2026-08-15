@@ -246,21 +246,28 @@ def test_init_refuses_a_hard_linked_source(tmp_path):
     assert src.read_bytes() == before
 
 
-def test_init_refuses_despite_a_discovery_ceiling(tmp_path):
-    # A ceiling in the caller's environment stops git walking up to the host
-    # repository, hiding exactly what the probe looks for.
+@pytest.mark.parametrize("var", ["GIT_CEILING_DIRECTORIES", "GIT_OBJECT_DIRECTORY",
+                                 "GIT_COMMON_DIR", "GIT_DIR", "GIT_WORK_TREE"])
+def test_init_refuses_whatever_git_env_the_caller_exports(tmp_path, var):
+    # Each of these hides the host repository from discovery, so the probe has
+    # to answer about the path it was given, not the caller's git context.
     host = tmp_path / "host"
     (host / "sub").mkdir(parents=True)
     subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
                    capture_output=True)
     src = tmp_path / "doc.md"
     write_lf(src, "# Sample\n\nfirst paragraph\n")
-    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(host))
-    r = subprocess.run([sys.executable, LOOP, "init", str(host / "sub" / "proj"),
+    # A ceiling hides the host by naming it; the object/dir redirects hide it by
+    # pointing discovery at somewhere that is not there.
+    value = host if var == "GIT_CEILING_DIRECTORIES" else tmp_path / "missing"
+    env = dict(os.environ, **{var: str(value)})
+    proj = host / "sub" / "proj"
+    r = subprocess.run([sys.executable, LOOP, "init", str(proj),
                         "--doc", str(src), "--reviewer", "Test Reviewer"],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 2
     assert "inside a git repository" in r.stderr
+    assert not proj.exists()
 
 
 def test_init_never_writes_through_a_symlinked_destination(tmp_path):
@@ -281,6 +288,25 @@ def test_init_never_writes_through_a_symlinked_destination(tmp_path):
     assert external.read_text(encoding="utf-8") == "external content\n"
     assert not (proj / "doc.md").is_symlink()
     assert "imported paragraph" in (proj / "doc.md").read_text(encoding="utf-8")
+
+
+def test_rejected_init_leaves_a_symlinked_destination_in_place(tmp_path):
+    # The destination is only replaced once the source has been read: a source
+    # that cannot be decoded must not cost the user the link.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.symlink(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("symlinks not permitted on this platform")
+    src = tmp_path / "doc.md"
+    src.write_bytes(b"\xff\xfe\x00not valid utf-8")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode != 0
+    assert (proj / "doc.md").is_symlink()
+    assert external.read_text(encoding="utf-8") == "external content\n"
 
 
 def test_init_reinits_an_existing_project(project, tmp_path):
