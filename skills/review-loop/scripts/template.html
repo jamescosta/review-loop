@@ -646,8 +646,12 @@ function locateAnchor(anchor, root, ctx) {
   // advance; the page never records one, a hand-made blob can.
   if (!anchor.text) return null;
   const text = ctx.text;
-  const before = anchor.before || "";
-  const after = anchor.after || "";
+  // Anything that is not a string is no context at all: apply checks that the
+  // anchor's keys exist, not what they hold, so a hand-made blob can persist a
+  // number here — and a thread that threw while being placed would take the
+  // whole page down with it on this turn and every turn after.
+  const before = typeof anchor.before === "string" ? anchor.before : "";
+  const after = typeof anchor.after === "string" ? anchor.after : "";
   const hits = [];
   for (let i = text.indexOf(anchor.text); i >= 0;
        i = text.indexOf(anchor.text, i + 1)) hits.push(i);
