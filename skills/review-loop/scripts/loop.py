@@ -321,7 +321,12 @@ def inside_repository(path):
     # ever names the ones already discovered. Answering "what is at this path"
     # needs no git configuration at all.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update(LANG="C", LC_ALL="C")
+    # The probe states its own git environment rather than inheriting one.
+    # Discovery must cross filesystem boundaries: stopping at one hides a
+    # repository above a mount, and reports it in a differently worded message
+    # that the check below would read as an unrecognized failure — refusing
+    # every first init under a mounted home, an external volume or a share.
+    env.update(LANG="C", LC_ALL="C", GIT_DISCOVERY_ACROSS_FILESYSTEM="1")
     r = subprocess.run(["git", "-C", str(path), "rev-parse",
                         "--is-inside-work-tree", "--is-inside-git-dir"],
                        env=env, capture_output=True, text=True)

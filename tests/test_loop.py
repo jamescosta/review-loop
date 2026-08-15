@@ -1,7 +1,9 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -307,6 +309,23 @@ def test_rejected_init_leaves_a_symlinked_destination_in_place(tmp_path):
     assert r.returncode != 0
     assert (proj / "doc.md").is_symlink()
     assert external.read_text(encoding="utf-8") == "external content\n"
+
+
+def test_init_succeeds_below_a_filesystem_boundary():
+    # Discovery stopping at a mount reports a differently worded diagnostic, and
+    # reading that as an unrecognized failure refuses an ordinary safe init.
+    shm = Path("/dev/shm")
+    if not (shm.is_dir() and os.access(shm, os.W_OK)):
+        pytest.skip("no writable /dev/shm to sit below a mount point")
+    area = Path(tempfile.mkdtemp(dir=str(shm)))
+    try:
+        src = area / "doc.md"
+        write_lf(src, "# Sample\n\nfirst paragraph\n")
+        r = run(["init", area / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+        assert r.returncode == 0, r.stderr
+        assert (area / "proj" / "doc.md").is_file()
+    finally:
+        shutil.rmtree(area, ignore_errors=True)
 
 
 def test_init_reinits_an_existing_project(project, tmp_path):
