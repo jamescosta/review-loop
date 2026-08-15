@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """review-loop plumbing: git setup, turn state, diffs, blob verification, apply.
 
 Everything mechanical in the loop lives here; SKILL.md drives the agent's
@@ -325,16 +325,106 @@ def reviewer_ident(name):
     return (name, f"{slug}@review-loop.local")
 
 
+def nearest_existing_dir(path):
+    p = Path(path).resolve()
+    while not p.is_dir():
+        if p.parent == p:
+            return p
+        p = p.parent
+    return p
+
+
+def inside_repository(path):
+    # git's messages are gettext-translated, and the fallback below reads one.
+    # git's own test suite pins LANG/LC_ALL to C for that reason; so does this,
+    # or a translated locale turns every plain folder into an unreadable answer.
+    # Every GIT_* variable goes, not a list of the known-dangerous ones: a
+    # ceiling, a redirected GIT_DIR, GIT_OBJECT_DIRECTORY and GIT_COMMON_DIR
+    # each hide the repository this probe exists to find, and an allowlist only
+    # ever names the ones already discovered. Answering "what is at this path"
+    # needs no git configuration at all.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # The probe states its own git environment rather than inheriting one.
+    # Discovery must cross filesystem boundaries: stopping at one hides a
+    # repository above a mount, and reports it in a differently worded message
+    # that the check below would read as an unrecognized failure — refusing
+    # every first init under a mounted home, an external volume or a share.
+    env.update(LANG="C", LC_ALL="C", GIT_DISCOVERY_ACROSS_FILESYSTEM="1")
+    r = subprocess.run(["git", "-C", str(path), "rev-parse",
+                        "--is-inside-work-tree", "--is-inside-git-dir"],
+                       env=env, capture_output=True, text=True)
+    if r.returncode == 0:
+        # A bare repository and a .git directory both answer work-tree=false,
+        # so either predicate alone lets one of them through.
+        return "true" in r.stdout.split()
+    # Exit 128 covers both "no repository here" — the ordinary answer — and a
+    # repository git refuses to read (dubious ownership, a .git marker pointing
+    # at a missing gitdir). Only the first is a clean no, and only the parenthesis
+    # tells them apart: a damaged marker reports "not a git repository: <gitdir>"
+    # against the plain folder's "(or any of the parent directories)". Anything
+    # unrecognized stops rather than waving init on.
+    if "not a git repository (or any of the parent directories)" in r.stderr.lower():
+        return False
+    fail(f"could not tell whether {path} sits inside a git repository: "
+         f"{r.stderr.strip()}")
+
+
+def is_review_loop_project(project):
+    """The re-init exemption. A directory that merely contains a
+    .review/state.json is not a project: the state must be readable and name a
+    document that is actually here, or a stray or half-written file hands a
+    user's own repository to `git add -A`."""
+    try:
+        state = json.loads(read_text(review_dir(project) / "state.json"))
+    except (OSError, ValueError):
+        return False
+    doc = state.get("doc") if isinstance(state, dict) else None
+    return bool(doc) and (project / doc).is_file()
+
+
+def refuse_nested_project(project):
+    """Every turn commits with `git add -A`, so a project pointed at another
+    repository's root sweeps that repository's uncommitted work into the
+    document's history. An existing review-loop project re-inits normally."""
+    if is_review_loop_project(project):
+        return
+    host = nearest_existing_dir(project)
+    if inside_repository(host):
+        fail(f"{host} is inside a git repository, so a review-loop project cannot "
+             "live there: the loop commits with `git add -A`, which at a "
+             "repository's root sweeps that repository's uncommitted work into the "
+             "document's history, and below one buries a second repository inside "
+             "the first. Nothing was created — pick a folder outside any "
+             "repository, e.g. ~/Documents/review-loop/<doc-slug>/.")
+
+
 # ------------------------------------------------------------ subcommands
 
 def cmd_init(args):
     project = Path(args.project)
+    refuse_nested_project(project)  # before anything is created on disk
     project.mkdir(parents=True, exist_ok=True)
     src = Path(args.doc)
     if not src.exists():
         fail(f"document {src} does not exist")
     doc_name = src.name
-    write_text(project / doc_name, to_lf(read_text(src)))
+    dest = project / doc_name
+    # samefile, not path equality: a hard link reaches the same bytes under a
+    # second name, and opening it for writing truncates the user's original.
+    if dest.exists() and dest.samefile(src):
+        fail(f"{src} and {dest} are the same file, so importing would rewrite the "
+             "original in place rather than copy it. Give the project a folder of "
+             "its own, e.g. ~/Documents/review-loop/<doc-slug>/.")
+    # Read before touching the destination: a source that cannot be decoded
+    # raises here, and a rejected import must leave the project as it found it.
+    content = to_lf(read_text(src))
+    # Replace the destination entry rather than writing through it: a symlink or
+    # a hard link there reaches a file outside the project, and opening it in
+    # place would truncate that file. The check above has already refused the one
+    # entry that must not be removed — the source itself.
+    if dest.is_symlink() or dest.is_file():
+        dest.unlink()
+    write_text(dest, content)
 
     if not (project / ".git").exists():
         git(project, "init", "-b", "main")

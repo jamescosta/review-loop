@@ -1,6 +1,9 @@
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -221,6 +224,213 @@ def project(tmp_path):
     return proj
 
 
+def test_init_refuses_to_nest_inside_a_git_repo(tmp_path):
+    # The loop's `git add -A` must never reach a host repository's work.
+    host = tmp_path / "host"
+    host.mkdir()
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    proj = host / "nested" / "proj"
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    assert "~/Documents/review-loop" in r.stderr  # the recovery
+    assert not (host / "nested").exists()  # refused before anything was created
+
+
+def test_init_refuses_a_bare_repository(tmp_path):
+    # A bare repo answers --is-inside-work-tree=false; only --is-inside-git-dir
+    # catches it, and writing a project into one corrupts the repository.
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", bare / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    assert not (bare / "proj").exists()
+
+
+def test_init_refuses_to_import_a_document_onto_itself(tmp_path):
+    # Project == the document's own folder: the import would rewrite the
+    # original through to_lf() instead of copying it.
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    src = docs / "doc.md"
+    with open(src, "wb") as f:  # CRLF, no trailing newline — to_lf would change both
+        f.write(b"# Sample\r\n\r\nfirst paragraph")
+    before = src.read_bytes()
+    r = run(["init", docs, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "rewrite the original in place" in r.stderr
+    assert src.read_bytes() == before  # the user's file is untouched
+
+
+def test_init_refuses_a_damaged_repository_marker(tmp_path):
+    # A .git file pointing at a missing gitdir draws a different "not a git
+    # repository" message; reading it as a clean no would nest the project
+    # inside a repository that is merely broken.
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    write_lf(broken / ".git", "gitdir: /nonexistent/path/to/gitdir\n")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", broken / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "could not tell whether" in r.stderr
+    assert not (broken / "proj").exists()
+
+
+def test_init_refuses_a_repository_with_a_stray_state_file(tmp_path):
+    # The re-init exemption must not be claimable by a stray or half-written
+    # state file: the host's own uncommitted work would be swept into the
+    # import commit.
+    host = tmp_path / "host"
+    host.mkdir()
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    (host / ".review").mkdir()
+    write_lf(host / ".review" / "state.json", "{}\n")
+    write_lf(host / "app.py", "print('work in progress')\n")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    r = run(["init", host, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    log = subprocess.run(["git", "-C", str(host), "log", "--oneline"],
+                         capture_output=True, text=True)
+    assert log.stdout.strip() == ""  # nothing of the host's was committed
+
+
+def test_init_refuses_a_hard_linked_source(tmp_path):
+    # Two paths, one inode: path equality misses it and the import would
+    # truncate the user's original through the shared file.
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.link(src, proj / "doc.md")
+    except OSError:
+        pytest.skip("filesystem does not support hard links")
+    before = src.read_bytes()
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 2
+    assert "rewrite the original in place" in r.stderr
+    assert src.read_bytes() == before
+
+
+@pytest.mark.parametrize("var", ["GIT_CEILING_DIRECTORIES", "GIT_OBJECT_DIRECTORY",
+                                 "GIT_COMMON_DIR", "GIT_DIR", "GIT_WORK_TREE"])
+def test_init_refuses_whatever_git_env_the_caller_exports(tmp_path, var):
+    # Each of these hides the host repository from discovery, so the probe has
+    # to answer about the path it was given, not the caller's git context.
+    host = tmp_path / "host"
+    (host / "sub").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    # A ceiling hides the host by naming it; the object/dir redirects hide it by
+    # pointing discovery at somewhere that is not there.
+    value = host if var == "GIT_CEILING_DIRECTORIES" else tmp_path / "missing"
+    env = dict(os.environ, **{var: str(value)})
+    proj = host / "sub" / "proj"
+    r = subprocess.run([sys.executable, LOOP, "init", str(proj),
+                        "--doc", str(src), "--reviewer", "Test Reviewer"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+    assert not proj.exists()
+
+
+def test_init_never_writes_through_a_symlinked_destination(tmp_path):
+    # An aliased destination must be replaced, not written through: the write
+    # would truncate a file outside the project.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.symlink(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("symlinks not permitted on this platform")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nimported paragraph\n")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+    assert external.read_text(encoding="utf-8") == "external content\n"
+    assert not (proj / "doc.md").is_symlink()
+    assert "imported paragraph" in (proj / "doc.md").read_text(encoding="utf-8")
+
+
+def test_rejected_init_leaves_a_symlinked_destination_in_place(tmp_path):
+    # The destination is only replaced once the source has been read: a source
+    # that cannot be decoded must not cost the user the link.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.symlink(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("symlinks not permitted on this platform")
+    src = tmp_path / "doc.md"
+    src.write_bytes(b"\xff\xfe\x00not valid utf-8")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode != 0
+    assert (proj / "doc.md").is_symlink()
+    assert external.read_text(encoding="utf-8") == "external content\n"
+
+
+def test_init_succeeds_below_a_filesystem_boundary():
+    # Discovery stopping at a mount reports a differently worded diagnostic, and
+    # reading that as an unrecognized failure refuses an ordinary safe init.
+    shm = Path("/dev/shm")
+    if not (shm.is_dir() and os.access(shm, os.W_OK)):
+        pytest.skip("no writable /dev/shm to sit below a mount point")
+    area = Path(tempfile.mkdtemp(dir=str(shm)))
+    try:
+        src = area / "doc.md"
+        write_lf(src, "# Sample\n\nfirst paragraph\n")
+        r = run(["init", area / "proj", "--doc", src, "--reviewer", "Test Reviewer"])
+        assert r.returncode == 0, r.stderr
+        assert (area / "proj" / "doc.md").is_file()
+    finally:
+        shutil.rmtree(area, ignore_errors=True)
+
+
+def test_init_replaces_a_hard_linked_destination(tmp_path):
+    # A hard link at the destination is a second name for a file outside the
+    # project; writing in place would truncate it under both names.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.link(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("filesystem does not support hard links")
+    srcdir = tmp_path / "srcdir"
+    srcdir.mkdir()
+    src = srcdir / "doc.md"
+    write_lf(src, "# Sample\n\nimported paragraph\n")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+    assert external.read_text(encoding="utf-8") == "external content\n"
+    assert "imported paragraph" in (proj / "doc.md").read_text(encoding="utf-8")
+
+
+def test_init_reinits_an_existing_project(project, tmp_path):
+    # The project is itself a git repo; the nesting guard must not fire on it.
+    r = run(["init", project, "--doc", tmp_path / "doc.md",
+             "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+
+
 def test_agent_commit_identity_and_state(project):
     log = subprocess.run(["git", "-C", str(project), "log", "--format=%an|%s"],
                          capture_output=True, text=True).stdout.strip().split("\n")
@@ -390,6 +600,7 @@ def test_apply_rolls_back_when_commit_fails(project, tmp_path):
     edited = base.replace("improved", "improved and edited")
     hook = project / ".git" / "hooks" / "pre-commit"
     write_lf(hook, "#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)  # git ignores a hook without the executable bit
     r = apply_blob(project, tmp_path, make_blob(edited, turn=1, base=base))
     assert r.returncode == 2
     # Nothing half-applied: the file is back to the shipped base, the turn
