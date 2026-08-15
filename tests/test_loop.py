@@ -338,6 +338,7 @@ def test_apply_rolls_back_when_commit_fails(project, tmp_path):
     edited = base.replace("improved", "improved and edited")
     hook = project / ".git" / "hooks" / "pre-commit"
     write_lf(hook, "#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)  # git ignores a hook without the executable bit
     r = apply_blob(project, tmp_path, make_blob(edited, turn=1, base=base))
     assert r.returncode == 2
     # Nothing half-applied: the file is back to the shipped base, the turn
