@@ -210,6 +210,7 @@ function fnv1a(str) {
    splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
    drift, the round-trip self-check reports false mismatches. */
 const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
+const HEADING_LINE = /^#{1,6}\s/;
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
 
 function splitBlocks(doc) {
@@ -229,6 +230,11 @@ function splitBlocks(doc) {
     }
     if (stripped === "") {
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+    } else if (HEADING_LINE.test(ln)) {
+      // A heading always stands alone, so nothing downstream has to split
+      // one back out of a block it shares with body text.
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+      blocks.push(ln);
     } else cur.push(ln);
   }
   if (cur.length) blocks.push(cur.join("\n"));
@@ -238,7 +244,7 @@ function splitBlocks(doc) {
 function blockKind(block) {
   const first = block.split("\n", 1)[0];
   if (first.trimStart().startsWith("```")) return "fence";
-  if (/^#{1,6}\s/.test(first)) return "heading";
+  if (HEADING_LINE.test(first)) return "heading";
   if (LIST_LINE.test(first)) return "list";
   return "para";
 }
@@ -273,10 +279,6 @@ function normalize(doc) {
     const lines = b.split("\n");
     if (kind === "fence") {
       out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
-    } else if (kind === "heading") {
-      out.push(collapse(lines[0]));
-      const rest = collapse(lines.slice(1).join(" "));
-      if (rest) out.push(rest);
     } else if (kind === "list") {
       out.push(parseListItems(lines).map((it) =>
         ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
@@ -326,8 +328,6 @@ function renderBlock(block, container) {
     const h = document.createElement("h" + level);
     renderInline(lines[0].replace(/^#{1,6}\s+/, ""), h);
     container.appendChild(h);
-    const rest = lines.slice(1).join(" ").trim();
-    if (rest) { const p = document.createElement("p"); renderInline(rest, p); container.appendChild(p); }
   } else if (kind === "list") {
     const items = parseListItems(lines);
     const stack = [];

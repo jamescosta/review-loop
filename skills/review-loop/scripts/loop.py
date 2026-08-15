@@ -59,6 +59,7 @@ def fnv1a(text):
 # split_blocks / block_kind / normalize are mirrored in template.html; the
 # two implementations must stay identical or the round-trip check lies.
 
+HEADING_LINE = re.compile(r"^#{1,6}\s")
 LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
 
 
@@ -84,6 +85,13 @@ def split_blocks(doc):
             if cur:
                 blocks.append("\n".join(cur))
                 cur = []
+        elif HEADING_LINE.match(ln):
+            # A heading always stands alone, so nothing downstream has to
+            # split one back out of a block it shares with body text.
+            if cur:
+                blocks.append("\n".join(cur))
+                cur = []
+            blocks.append(ln)
         else:
             cur.append(ln)
     if cur:
@@ -95,7 +103,7 @@ def block_kind(block):
     first = block.split("\n", 1)[0]
     if first.lstrip().startswith("```"):
         return "fence"
-    if re.match(r"^#{1,6}\s", first):
+    if HEADING_LINE.match(first):
         return "heading"
     if LIST_LINE.match(first):
         return "list"
@@ -116,11 +124,6 @@ def normalize(doc):
         lines = b.split("\n")
         if kind == "fence":
             out.append("\n".join(l.rstrip() for l in lines))
-        elif kind == "heading":
-            out.append(collapse(lines[0]))
-            rest = collapse(" ".join(lines[1:]))
-            if rest:
-                out.append(rest)
         elif kind == "list":
             # Canonical markers and 2-space nesting; continuation lines merge
             # into their item, so soft-wrap churn is not an edit.
