@@ -451,6 +451,26 @@ def test_build_artifact_embeds_escaped_data(project):
     assert data["turn"] == 1 and data["checksum"] == loop.fnv1a(data["baseDoc"])
 
 
+def test_carried_thread_anchors_keep_their_context(project, tmp_path):
+    # The page places a thread by matching its recorded context against the
+    # current document, so a carried thread has to reach the next artifact
+    # with the anchor the reviewer's selection produced — both context sides
+    # included. Dropping them costs no test elsewhere and silently demotes
+    # every relocation to a bare text match.
+    anchor = {"text": "first paragraph", "occurrence": 0,
+              "before": "Sample\n", "after": ", improved\n"}
+    blob = make_blob(turn_base(project), turn=1, comments=[
+        {"id": "c1-1", "reply_to": None, "anchor": anchor, "body": "Why this wording?"}])
+    assert apply_blob(project, tmp_path, blob).returncode == 0
+    stored = json.loads((project / ".review" / "comments.json").read_text())["threads"]
+    assert stored[0]["anchor"] == anchor
+
+    write_lf(project / "doc.md", "# Sample\n\nfirst paragraph, improved again\n")
+    assert run(["agent-commit", project, "--summary", "next pass"]).returncode == 0
+    assert run(["build-artifact", project]).returncode == 0
+    assert json.loads(raw_payload(project))["threads"][0]["anchor"] == anchor
+
+
 def test_apply_rejects_stale_turn(project, tmp_path):
     r = apply_blob(project, tmp_path, make_blob(turn_base(project), turn=7))
     assert r.returncode == 2

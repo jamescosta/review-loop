@@ -588,15 +588,60 @@ function pointOffset(container, offset, map) {
   return entry ? entry.start + last.nodeValue.length : null;
 }
 
+function runBack(recorded, actual) {
+  let n = 0;
+  while (n < recorded.length && n < actual.length &&
+    recorded[recorded.length - 1 - n] === actual[actual.length - 1 - n]) n += 1;
+  return n;
+}
+
+function runForward(recorded, actual) {
+  let n = 0;
+  while (n < recorded.length && n < actual.length && recorded[n] === actual[n]) n += 1;
+  return n;
+}
+
+/* An anchor's occurrence index is a position in a document that keeps
+   changing: an identical string inserted earlier slides the index onto the
+   wrong instance, and one deleted earlier slides it off the end. before/after
+   are the evidence that tells the instances apart, so the match runs on them
+   and the index is demoted to a tiebreak.
+
+   Every occurrence of the anchor text scores how much of its recorded context
+   it still agrees with, counting inward from each side — an edit beside the
+   anchor costs only the characters it touched, which is why an edit near
+   commented text no longer moves the thread. A single best-scoring occurrence
+   wins; a lone occurrence wins for free, there being nowhere else it could be.
+   When several tie, the recorded index wins if it is one of them — that is the
+   position the anchor already claimed, and the evidence has not contradicted
+   it. Otherwise the anchor is unlocatable: the caller flags the thread rather
+   than pointing it somewhere on a guess. Text that is gone entirely is
+   unlocatable exactly as it always was. */
 function locateAnchor(anchor, root, ctx) {
   if (!ctx) ctx = docTextAndMap(root);
-  let idx = -1; let from = 0;
-  for (let k = 0; k <= anchor.occurrence; k += 1) {
-    idx = ctx.text.indexOf(anchor.text, from);
-    if (idx < 0) return null;
-    from = idx + 1;
+  // An empty anchor text matches everywhere, so the walk below would not
+  // advance; the page never records one, a hand-made blob can.
+  if (!anchor.text) return null;
+  const text = ctx.text;
+  const before = anchor.before || "";
+  const after = anchor.after || "";
+  const hits = [];
+  for (let i = text.indexOf(anchor.text); i >= 0;
+       i = text.indexOf(anchor.text, i + 1)) hits.push(i);
+  if (!hits.length) return null;
+
+  let best = -1; const winners = [];
+  for (let k = 0; k < hits.length; k += 1) {
+    const stop = hits[k] + anchor.text.length;
+    const score = runBack(before, text.slice(Math.max(0, hits[k] - before.length), hits[k])) +
+      runForward(after, text.slice(stop, stop + after.length));
+    if (score > best) { best = score; winners.length = 0; }
+    if (score === best) winners.push(k);
   }
-  return { idx, map: ctx.map };
+  const pick = winners.length === 1 ? winners[0]
+    : winners.includes(anchor.occurrence) ? anchor.occurrence : -1;
+  if (pick < 0) return null;
+  return { idx: hits[pick], map: ctx.map };
 }
 
 function segmentsFor(map, from, to) {
@@ -876,8 +921,11 @@ function renderThreads() {
     if (!located) {
       const o = document.createElement("span");
       o.className = "orphan";
-      o.textContent = "commented text was edited away — was: " +
-        quoted(t.anchor.text, 50);
+      // Two ways to be unlocatable, and the reviewer can act on only one of
+      // them, so they are never reported as the same thing.
+      o.textContent = (ctx.text.includes(t.anchor.text)
+        ? "commented text now appears in several places — was: "
+        : "commented text was edited away — was: ") + quoted(t.anchor.text, 50);
       head.appendChild(o);
     } else {
       for (const s of segmentsFor(ctx.map, located.idx,
