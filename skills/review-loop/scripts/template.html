@@ -601,22 +601,45 @@ function runForward(recorded, actual) {
   return n;
 }
 
+/* What one surviving stretch of recorded context is worth. A partial run has
+   to carry a whole word to count for anything: unrelated prose agrees on the
+   space beside the anchor and rarely more, so counting those characters lets a
+   coincidence outrank a side that survived intact. A side matching in full
+   always counts however short it is — short only happens at the document's
+   edge, where there was never more context to record. */
+const WHOLE_WORD = /\s\S+\s/;
+
+function evidence(kept, recordedLength) {
+  if (kept.length === recordedLength) return kept.length;
+  return WHOLE_WORD.test(kept) ? kept.length : 0;
+}
+
 /* An anchor's occurrence index is a position in a document that keeps
    changing: an identical string inserted earlier slides the index onto the
    wrong instance, and one deleted earlier slides it off the end. before/after
    are the evidence that tells the instances apart, so the match runs on them
-   and the index is demoted to a tiebreak.
+   and the index survives only as a tiebreak.
 
    Every occurrence of the anchor text scores how much of its recorded context
    it still agrees with, counting inward from each side — an edit beside the
    anchor costs only the characters it touched, which is why an edit near
-   commented text no longer moves the thread. A single best-scoring occurrence
-   wins; a lone occurrence wins for free, there being nowhere else it could be.
-   When several tie, the recorded index wins if it is one of them — that is the
-   position the anchor already claimed, and the evidence has not contradicted
-   it. Otherwise the anchor is unlocatable: the caller flags the thread rather
-   than pointing it somewhere on a guess. Text that is gone entirely is
-   unlocatable exactly as it always was. */
+   commented text no longer moves the thread. The single best-scoring
+   occurrence wins, a lone occurrence winning for free.
+
+   A tie says the evidence cannot separate the candidates, and only one kind of
+   tie is safe to settle: total agreement, every recorded character still
+   matching on both sides of each. Those instances read identically to a human
+   down to their surroundings, so the recorded index stands and the thread stays
+   where it was. Below that, and when no candidate keeps any context at all, the
+   index is a stale claim rather than a tiebreak — it is the thing that went
+   wrong — so the anchor goes unlocatable and the caller flags the thread rather
+   than placing it on a guess. Text that is gone entirely is unlocatable exactly
+   as it always was.
+
+   The deliberate trade: a repeated string whose context has been edited on both
+   sides is reported unplaceable, where matching on the index alone would have
+   placed it — rightly while nothing was inserted or deleted ahead of it, wrongly
+   and invisibly once something was. Flagged uncertainty beats a silent guess. */
 function locateAnchor(anchor, root, ctx) {
   if (!ctx) ctx = docTextAndMap(root);
   // An empty anchor text matches everywhere, so the walk below would not
@@ -630,16 +653,22 @@ function locateAnchor(anchor, root, ctx) {
        i = text.indexOf(anchor.text, i + 1)) hits.push(i);
   if (!hits.length) return null;
 
-  let best = -1; const winners = [];
+  let best = 0; const winners = [];
   for (let k = 0; k < hits.length; k += 1) {
     const stop = hits[k] + anchor.text.length;
-    const score = runBack(before, text.slice(Math.max(0, hits[k] - before.length), hits[k])) +
-      runForward(after, text.slice(stop, stop + after.length));
+    const keptBefore = before.slice(before.length -
+      runBack(before, text.slice(Math.max(0, hits[k] - before.length), hits[k])));
+    const keptAfter = after.slice(0,
+      runForward(after, text.slice(stop, stop + after.length)));
+    const score = evidence(keptBefore, before.length) + evidence(keptAfter, after.length);
     if (score > best) { best = score; winners.length = 0; }
     if (score === best) winners.push(k);
   }
-  const pick = winners.length === 1 ? winners[0]
-    : winners.includes(anchor.occurrence) ? anchor.occurrence : -1;
+  const interchangeable = best === before.length + after.length &&
+    winners.includes(anchor.occurrence);
+  const pick = best === 0 ? -1
+    : winners.length === 1 ? winners[0]
+    : interchangeable ? anchor.occurrence : -1;
   if (pick < 0) return null;
   return { idx: hits[pick], map: ctx.map };
 }
