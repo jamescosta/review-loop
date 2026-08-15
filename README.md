@@ -24,6 +24,10 @@ The skill is not installed anywhere by default. To use it from Claude Code,
 copy the folder into your user skills directory:
 
 ```
+cp -R skills/review-loop ~/.claude/skills/review-loop
+```
+
+```
 Copy-Item -Recurse skills\review-loop $env:USERPROFILE\.claude\skills\review-loop
 ```
 

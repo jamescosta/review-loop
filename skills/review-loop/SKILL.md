@@ -21,7 +21,7 @@ commands exist:
 
 ```
 python --version     (some machines answer to python3 instead)
-git --version
+git --version        (2.28 or newer — init creates the repo with `git init -b`)
 ```
 
 If either is missing, stop and tell the user what to install — Python from
@@ -29,13 +29,31 @@ python.org, git from git-scm.com — rather than failing mid-loop. Use
 whichever Python spelling the machine answers to; examples below show
 `python`.
 
+## Where projects live
+
+One folder per document, in a home of their own — default
+`~/Documents/review-loop/<doc-slug>/` (on Windows,
+`C:\Users\<you>\Documents\review-loop\<doc-slug>\`). Never put a project inside
+a git repository: the loop commits with `git add -A`, which at a repository's
+root sweeps that repository's uncommitted work into the document's history, and
+below one buries a second repository inside the first. `init` refuses rather
+than nesting.
+
+`init` copies the document into the project, so the user's original file is
+never touched. When the reviewer says done, copy the finished document out of
+the project to wherever it should live.
+
+A project runs about 200 KB on disk and grows a few KB per turn. The published
+turn page and its version history live on the user's claude.ai account, not on
+disk.
+
 ## Starting a project
 
 Inputs: a file path (or pasted text — write it to a file first), an ask, and
 optionally the reviewer's name for commit attribution (default "Reviewer").
 
 ```
-python SCRIPTS/loop.py init PROJECT --doc PATH\TO\doc.md --reviewer "Name"
+python SCRIPTS/loop.py init PROJECT --doc PATH/TO/doc.md --reviewer "Name"
 ```
 
 Creates the project folder and git repo if needed, normalizes the document to
@@ -58,6 +76,11 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
    ```
    python SCRIPTS/loop.py build-artifact PROJECT
    ```
+
+   Publishing puts the whole document online: the turn page embeds the full
+   document in a claude.ai artifact page, private by default but readable by
+   anyone holding the link, and the page's version history retains earlier
+   turns.
 
    Publish `PROJECT/.review/artifact.html` with the Artifact tool — **the same
    file path every turn** so the URL stays stable (pass favicon 🔁 to the
@@ -87,7 +110,7 @@ which project, ask rather than guessing. Save a pasted blob to a file
 verbatim, then:
 
 ```
-python SCRIPTS/loop.py apply PROJECT --blob PATH\TO\blob.json --reviewer "Name"
+python SCRIPTS/loop.py apply PROJECT --blob PATH/TO/blob.json --reviewer "Name"
 ```
 
 The script verifies before touching anything — wrong turn, damaged blob,
