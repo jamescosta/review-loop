@@ -54,6 +54,61 @@ def test_split_blocks_keeps_blank_lines_inside_fences():
     assert blocks[1] == "```\na\n\nb\n```"
 
 
+def test_split_blocks_gives_each_heading_its_own_block():
+    assert loop.split_blocks("intro\n# Title\nbody\n## Sub\nmore") == [
+        "intro", "# Title", "body", "## Sub", "more"]
+
+
+def test_split_blocks_splits_only_on_block_kind_headings():
+    # The split rule is block_kind's: seven hashes, a bare hash-word and an
+    # indented hash are paragraph text, and none of them starts a block.
+    doc = "####### seven\n#hashtag\n  # indented\n#\ntail"
+    assert loop.split_blocks(doc) == [doc]
+    assert loop.block_kind(doc) == "para"
+
+
+def test_split_blocks_needs_content_after_the_heading_marker():
+    # A marker with nothing visible after it renders to an empty element the
+    # page's serializer drops, which would fail the round-trip check. nbsp
+    # counts as separator, not content: the renderer strips it too.
+    for blank in ("# ", "#  ", "# \xa0", "#\xa0", "#\xa0\xa0", "#\t"):
+        assert loop.split_blocks("intro\n%s\nbody" % blank) == [
+            "intro\n%s\nbody" % blank], blank
+    # A separator run of any of them still opens a heading with real content.
+    for marker in ("# Title", "#\tTitle", "#\xa0Title", "# \xa0Title"):
+        assert loop.split_blocks("intro\n%s\nbody" % marker) == [
+            "intro", marker, "body"], marker
+
+
+def test_heading_separator_is_the_same_class_in_both_runtimes():
+    # \s covers U+0085 and U+001C-U+001F in Python but not in JS, and
+    # U+FEFF and U+2028 in JS but not in Python. The separator is spelled
+    # out instead, so no character's membership depends on the runtime.
+    for sep in ("\x85", "\x1c", "\ufeff", "\u2028", "\u3000"):
+        doc = "intro\n#%sTitle\nbody" % sep
+        assert loop.split_blocks(doc) == [doc], repr(sep)
+
+
+def test_split_blocks_ignores_heading_lines_inside_fences():
+    assert loop.split_blocks("```\n# fenced\n```\n# after") == [
+        "```\n# fenced\n```", "# after"]
+
+
+def test_normalize_pinned_vectors():
+    # Pinned; template.html's normalize() must produce the same for each.
+    for doc, want in [
+        ("# Title\ntrailing text", "# Title\n\ntrailing text"),
+        ("intro\n# Title\nbody", "intro\n\n# Title\n\nbody"),
+        ("###### H6\ntext", "###### H6\n\ntext"),
+        ("####### seven\ntext", "####### seven text"),
+        ("#hashtag\nmore", "#hashtag more"),
+        ("  # indented\nmore", "# indented more"),
+        ("- a\n# H\n- b", "- a\n\n# H\n\n- b"),
+        ("```\n# fenced\n```", "```\n# fenced\n```"),
+    ]:
+        assert loop.normalize(doc) == want, doc
+
+
 # ------------------------------------------------------------- checksum
 
 def test_fnv1a_known_values():
@@ -64,6 +119,19 @@ def test_fnv1a_known_values():
 
 
 # ------------------------------------------------------------- diffs
+
+def test_align_blocks_pairs_raw_blocks_with_the_matched_text():
+    # The single alignment both turn directions read: blocks match on their
+    # normalized text while each side keeps its raw text.
+    old = "# T\n\nalpha  beta\n\ndropped\n"
+    new = "# T\n\nalpha beta\n\nalpha gamma\n"
+    ops = list(loop.align_blocks(old, new))
+    assert [(o.tag, o.old, o.new) for o in ops] == [
+        ("equal", ["# T", "alpha  beta"], ["# T", "alpha beta"]),
+        ("replace", ["dropped"], ["alpha gamma"]),
+    ]
+    assert ops[0].old_norm == ["# T", "alpha beta"]
+
 
 def test_block_diff_shapes():
     old = "# T\n\nalpha beta gamma\n\n- a\n- b\n"
@@ -82,6 +150,13 @@ def test_word_ops_ignore_rewrap_churn():
 def test_block_diff_lists_never_word_merge():
     d = loop.block_diff("- a\n- b\n", "- a\n- c\n")
     assert [p["t"] for p in d] == ["del", "ins"]
+
+
+def test_block_diff_separates_a_heading_from_the_line_under_it():
+    # The heading is its own block, so an edit below it never drags the
+    # heading into the changed pair.
+    d = loop.block_diff("# Title\nbody text\n", "# Title\nbody text edited\n")
+    assert [p["t"] for p in d] == ["eq", "chg"]
 
 
 def test_block_diff_heading_level_change_never_word_merges():
