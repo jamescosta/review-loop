@@ -317,6 +317,11 @@ def inside_repository(path):
     # or a translated locale turns every plain folder into an unreadable answer.
     env = os.environ.copy()
     env.update(LANG="C", LC_ALL="C")
+    # Discovery overrides inherited from the caller can hide the very repository
+    # this probe exists to find: a ceiling stops the upward walk before reaching
+    # it, and GIT_DIR/GIT_WORK_TREE answer about somewhere else entirely.
+    for var in ("GIT_CEILING_DIRECTORIES", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(var, None)
     r = subprocess.run(["git", "-C", str(path), "rev-parse",
                         "--is-inside-work-tree", "--is-inside-git-dir"],
                        env=env, capture_output=True, text=True)
@@ -382,6 +387,10 @@ def cmd_init(args):
         fail(f"{src} and {dest} are the same file, so importing would rewrite the "
              "original in place rather than copy it. Give the project a folder of "
              "its own, e.g. ~/Documents/review-loop/<doc-slug>/.")
+    # Import into the project, never through an alias: writing to a symlinked
+    # destination would truncate whatever it points at, outside the project.
+    if dest.is_symlink():
+        dest.unlink()
     write_text(dest, to_lf(read_text(src)))
 
     if not (project / ".git").exists():

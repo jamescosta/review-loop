@@ -246,6 +246,43 @@ def test_init_refuses_a_hard_linked_source(tmp_path):
     assert src.read_bytes() == before
 
 
+def test_init_refuses_despite_a_discovery_ceiling(tmp_path):
+    # A ceiling in the caller's environment stops git walking up to the host
+    # repository, hiding exactly what the probe looks for.
+    host = tmp_path / "host"
+    (host / "sub").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(host), "init", "-q"], check=True,
+                   capture_output=True)
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nfirst paragraph\n")
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(host))
+    r = subprocess.run([sys.executable, LOOP, "init", str(host / "sub" / "proj"),
+                        "--doc", str(src), "--reviewer", "Test Reviewer"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 2
+    assert "inside a git repository" in r.stderr
+
+
+def test_init_never_writes_through_a_symlinked_destination(tmp_path):
+    # An aliased destination must be replaced, not written through: the write
+    # would truncate a file outside the project.
+    external = tmp_path / "external.md"
+    write_lf(external, "external content\n")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    try:
+        os.symlink(external, proj / "doc.md")
+    except OSError:
+        pytest.skip("symlinks not permitted on this platform")
+    src = tmp_path / "doc.md"
+    write_lf(src, "# Sample\n\nimported paragraph\n")
+    r = run(["init", proj, "--doc", src, "--reviewer", "Test Reviewer"])
+    assert r.returncode == 0, r.stderr
+    assert external.read_text(encoding="utf-8") == "external content\n"
+    assert not (proj / "doc.md").is_symlink()
+    assert "imported paragraph" in (proj / "doc.md").read_text(encoding="utf-8")
+
+
 def test_init_reinits_an_existing_project(project, tmp_path):
     # The project is itself a git repo; the nesting guard must not fire on it.
     r = run(["init", project, "--doc", tmp_path / "doc.md",
