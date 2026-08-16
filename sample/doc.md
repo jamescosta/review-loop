@@ -2,7 +2,7 @@
 
 A synthetic sample document for the review loop. It exercises the rendered
 subset: headings, **bold**, *italic*, lists, [links](https://example.org),
-and `code`.
+`code`, and tables.
 
 ## Why a garden
 
@@ -21,6 +21,14 @@ Materials we already have:
 - Lumber for **four** beds
 - A donated water tank
 - Hand tools from the *street festival* fund
+
+## Timeline
+
+| Milestone | Owner | Target |
+| :--- | :---: | ---: |
+| Confirm the lease | Ada | March |
+| Recruit members | Bo | April |
+| Build the beds | Cy | June |
 
 ## Budget
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.2
+
+- **Tables render as tables.** A pipe table was a paragraph of literal pipes,
+  and editing that paragraph flattened the whole table onto one line in the
+  committed file. Tables are now their own block kind end to end, with column
+  alignment preserved. Detection is strict — pipe-led rows, a delimiter row,
+  no indentation — so anything ambiguous stays the paragraph it already was.
+- **The reviewer can change a table's shape**, not just its text: putting the
+  caret in a cell raises controls for adding and removing rows and columns.
+  Deleting the header row or the last column is refused rather than performed.
+- **Send checks the reviewer's own edits.** The load-time self-check only ever
+  saw the base document, so markdown the page could not read back was shipped
+  and committed, surfacing a turn later on a page that rebuilding could not
+  fix. Send now refuses instead, while the edit is still on screen.
+- **The mirror and the serializer are under test.** The block model is written
+  twice, in `loop.py` and in `template.html`; both are now pinned to one vector
+  list, and render/serialize are asserted to be inverses — the expression whose
+  mismatch disables a turn page had no coverage at all.
+
 ## 0.1.1
 
 - **The turn page declares its own character encoding.** Hosts that serve the

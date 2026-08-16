@@ -80,7 +80,8 @@ markdown file of your own works the same way.
    — those live in chat, not on the page.
 3. Open the URL. Toggle **Changes** to see what moved, **Clean** to read the
    result. Edit the text directly, and select any passage and **Add comment**
-   to leave a note against it.
+   to leave a note against it. Put the caret in a table cell and a small strip
+   of controls appears above the table for adding and removing rows and columns.
 4. Press **Send review**, then **Copy to clipboard** (or **Download file**), and
    paste it back into the chat.
 5. Claude verifies the review, applies it, commits it under your name, and
@@ -140,10 +141,12 @@ leaves unstated:
 - `.claude-plugin/` — `plugin.json` and the `marketplace.json` that makes this
   repository its own plugin marketplace.
 - `tests/` — guard and normalization tests for the loop
-  (`python -m pytest tests`), plus `tests/matcher/`, which replays the turn
-  page's own anchor matcher under a DOM shim (`node tests/matcher/check.js`,
-  `node tests/matcher/drift.js`, `python tests/matcher/mutate.py`). Node runs
-  that rig; the skill itself never needs it.
+  (`python -m pytest tests`), plus `tests/matcher/`, which runs the turn page's
+  own code under a DOM shim: the anchor matcher (`node tests/matcher/check.js`,
+  `node tests/matcher/drift.js`, `python tests/matcher/mutate.py`) and the block
+  model against `tests/vectors.json`, the vector list both runtimes are pinned
+  to (`node tests/matcher/roundtrip.js`). Node runs that rig; the skill itself
+  never needs it.
 - `sample/doc.md` — synthetic sample document for trying the loop.
 
 Design of record: Notion page "Review-loop prototype — skill + artifact
