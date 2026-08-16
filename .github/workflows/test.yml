@@ -29,4 +29,5 @@ jobs:
           python-version: '3.12'
       - run: node tests/matcher/check.js
       - run: node tests/matcher/drift.js
+      - run: node tests/matcher/roundtrip.js
       - run: python tests/matcher/mutate.py

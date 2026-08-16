@@ -14,6 +14,11 @@ import loop  # noqa: E402
 
 LOOP = str(SCRIPTS / "loop.py")
 
+# Shared with tests/matcher/roundtrip.js, which asserts the same vectors against
+# template.html's mirror of the block model. One list, both runtimes.
+VECTORS = json.loads((Path(__file__).parent / "vectors.json")
+                     .read_text(encoding="utf-8"))
+
 
 def write_lf(path, text):
     # Deliberately independent of loop.write_text: fixtures must not depend
@@ -98,18 +103,13 @@ def test_split_blocks_ignores_heading_lines_inside_fences():
 
 
 def test_normalize_pinned_vectors():
-    # Pinned; template.html's normalize() must produce the same for each.
-    for doc, want in [
-        ("# Title\ntrailing text", "# Title\n\ntrailing text"),
-        ("intro\n# Title\nbody", "intro\n\n# Title\n\nbody"),
-        ("###### H6\ntext", "###### H6\n\ntext"),
-        ("####### seven\ntext", "####### seven text"),
-        ("#hashtag\nmore", "#hashtag more"),
-        ("  # indented\nmore", "# indented more"),
-        ("- a\n# H\n- b", "- a\n\n# H\n\n- b"),
-        ("```\n# fenced\n```", "```\n# fenced\n```"),
-    ]:
-        assert loop.normalize(doc) == want, doc
+    for v in VECTORS["normalize"]:
+        assert loop.normalize(v["doc"]) == v["want"], v["doc"]
+
+
+def test_block_kind_pinned_vectors():
+    for v in VECTORS["kind"]:
+        assert loop.block_kind(v["doc"]) == v["want"], v["doc"]
 
 
 # ------------------------------------------------------------- checksum
