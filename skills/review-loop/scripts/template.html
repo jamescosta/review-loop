@@ -631,6 +631,45 @@ function tableCells(tr) {
     .filter((c) => c.tagName === "TH" || c.tagName === "TD");
 }
 
+/* The structural edits behind the turn page's row and column controls. They sit
+   here rather than with the controls so the test rig can reach them: the rig
+   loads everything above the app banner, and a table operation that gets a
+   column wrong is exactly the kind of thing a browser-only check misses. */
+function tableBody(tableEl) {
+  for (const child of tableEl.children) if (child.tagName === "TBODY") return child;
+  return tableEl;
+}
+
+function newCell(tag, align) {
+  const cell = document.createElement(tag);
+  if (align) cell.dataset.align = align;
+  cell.appendChild(document.createElement("br"));
+  return cell;
+}
+
+function insertRow(tableEl, at) {
+  // Always a body row: the header is what the delimiter row is rebuilt from,
+  // so nothing may be inserted above it.
+  const tr = document.createElement("tr");
+  for (const h of tableCells(tableRows(tableEl)[0])) {
+    tr.appendChild(newCell("td", h.dataset.align));
+  }
+  const body = tableBody(tableEl);
+  const ref = tableRows(tableEl)[at];
+  if (ref && ref.parentNode === body) body.insertBefore(tr, ref);
+  else body.appendChild(tr);
+}
+
+function insertColumn(tableEl, at) {
+  for (const tr of tableRows(tableEl)) {
+    const tag = tableCells(tr)[0] && tableCells(tr)[0].tagName === "TH" ? "th" : "td";
+    const cells = tableCells(tr);
+    const cell = newCell(tag, "");        // a new column carries no alignment
+    if (at < cells.length) tr.insertBefore(cell, cells[at]);
+    else tr.appendChild(cell);
+  }
+}
+
 function serializeTable(tableEl) {
   const rows = tableRows(tableEl);
   if (!rows.length || !tableCells(rows[0]).length) return "";
@@ -1030,13 +1069,6 @@ function hideTableTools() {
   toolCell = null;
 }
 
-function newCell(tag, align) {
-  const cell = document.createElement(tag);
-  if (align) cell.dataset.align = align;
-  cell.appendChild(document.createElement("br"));
-  return cell;
-}
-
 function caretInto(cell) {
   if (!cell) return;
   const range = document.createRange();
@@ -1069,29 +1101,6 @@ document.addEventListener("selectionchange", () => {
   tableTools.style.top = (window.scrollY + rect.top - 30) + "px";
   tableTools.style.left = (window.scrollX + rect.left) + "px";
 });
-
-function insertRow(table, at) {
-  // Always a body row: the header is what the delimiter row is rebuilt from,
-  // so nothing may be inserted above it.
-  const header = tableCells(tableRows(table)[0]);
-  const tr = document.createElement("tr");
-  for (const h of header) tr.appendChild(newCell("td", h.dataset.align));
-  const body = table.querySelector("tbody") || table;
-  const ref = tableRows(table)[at];
-  if (ref && ref.parentNode === body) body.insertBefore(tr, ref);
-  else body.appendChild(tr);
-}
-
-function insertColumn(table, at) {
-  for (const tr of tableRows(table)) {
-    const cells = tableCells(tr);
-    // A new column carries no alignment, and a row too short to reach the
-    // insertion point simply grows at its own end.
-    const cell = newCell(cells.length && cells[0].tagName === "TH" ? "th" : "td", "");
-    if (at < cells.length) tr.insertBefore(cell, cells[at]);
-    else tr.appendChild(cell);
-  }
-}
 
 tableTools.addEventListener("mousedown", (e) => {
   // mousedown rather than click, preventing default, so pressing a button never

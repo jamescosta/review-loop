@@ -96,7 +96,8 @@ function loadModule(templatePath) {
     .join("\n") + "*/\n";
   const factory = new Function("document", body +
     "\nreturn { splitBlocks, blockKind, renderMarkdown, docTextAndMap, locateAnchor," +
-    " segmentsFor, normalize, serialize, fnv1a };");
+    " segmentsFor, normalize, serialize, fnv1a, insertRow, insertColumn," +
+    " tableRows, tableCells };");
   return factory(makeShim());
 }
 
