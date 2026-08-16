@@ -1,3 +1,8 @@
+<!-- The charset declaration must lead the file: hosts that serve this page
+     raw (Cowork's artifact gallery, file://) have no header naming the
+     encoding, and a browser that guesses wrong shifts every multi-byte
+     character — the self-check then rejects the turn as corrupt. -->
+<meta charset="utf-8">
 <title>Review loop — __DOC_TITLE__</title>
 <style>
   /* Palette appears four times by design: the claude.ai artifact viewer —

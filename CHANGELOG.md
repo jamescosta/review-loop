@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+- **The turn page declares its own character encoding.** Hosts that serve the
+  page raw — Cowork's artifact gallery, a local file — gave the browser no
+  encoding to go on; a wrong guess shifted every multi-byte character and the
+  page's self-check refused the turn as corrupt. Found by the first live Cowork
+  run.
+- **README's Cowork section states what that run established**: Python and git
+  present, publishing via Cowork's artifact gallery, project folder
+  session-lived.
+
 ## 0.1.0
 
 The review-loop skill, packaged as a Claude Code plugin.

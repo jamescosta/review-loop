@@ -21,9 +21,9 @@ stays clean markdown with the whole history in git.
 **GitHub is not required.** git runs locally on your machine — no account, no
 remote, no push. The turn history lives in the project folder.
 
-**Cowork is not on this list yet.** The plugin installs there, but whether a
-Cowork session can run a turn has not been established — see the Cowork
-section below for exactly what is and is not known.
+**Cowork runs the loop too, with one caveat.** Its execution environment has
+Python and git and turns publish through Cowork's own artifact gallery, but the
+project folder only lives as long as the session — see the Cowork section.
 
 ## Install
 
@@ -113,20 +113,24 @@ Plugins install in Cowork the same way as in the desktop Chat tab, and the
 skills a plugin bundles work across chat on the web, the Chat tab in Claude
 Desktop, and Cowork
 ([Use plugins in Claude](https://support.claude.com/en/articles/13837440-use-plugins-in-claude)).
-Two things about where the work runs bear on this skill
-([Cowork architecture overview](https://support.claude.com/en/articles/14479288-claude-cowork-architecture-overview)):
+A live Cowork session established what the
+[architecture overview](https://support.claude.com/en/articles/14479288-claude-cowork-architecture-overview)
+leaves unstated:
 
-- **Cloud sessions** run the agent loop and code execution on Anthropic
-  infrastructure, in a sandbox created when the session starts and destroyed
-  when it ends. A project folder holding turn history does not survive that.
-- **Desktop sessions** run the agent loop natively on your device, with shell
-  commands and code executing in a per-session Linux VM.
-
-**Unverified:** Anthropic's documentation does not state whether Python 3 and
-git are available in that execution environment, whether code running there can
-read and write your connected local folders, or whether the turn page can be
-published from a Cowork session. Claude Code on the desktop is the supported
-path. The empirical check is to run one turn in a Cowork session and see.
+- **The execution environment has what the loop needs.** Python 3 and git are
+  present; project setup, the agent pass, and the turn-page build run
+  unmodified.
+- **Publishing goes through Cowork's artifact gallery.** Cowork has no
+  claude.ai Artifact tool; the turn page becomes a Cowork artifact with a
+  stable id across redeploys, and `.review/artifact-url.txt` records that
+  reference. The page declares its own character encoding, so it renders
+  intact served this way.
+- **The project folder is session-lived.** Code executes against a sandboxed
+  filesystem, not your desktop folders — cloud sandboxes are destroyed when
+  the session ends, and desktop sessions execute in a per-session VM. Turn
+  history does not outlive the session: before ending one, ask the agent to
+  write the finished document out to a folder of yours. For a loop that spans
+  sessions, run it in Claude Code on the desktop.
 
 ## Layout
 
