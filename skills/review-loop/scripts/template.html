@@ -237,16 +237,30 @@ function fnv1a(str) {
    splitBlocks / blockKind / normalize mirror loop.py exactly; if the two
    drift, the round-trip self-check reports false mismatches. */
 const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
-// Spelled out rather than \s: the two runtimes disagree on which exotic
-// characters that class covers. The separator is the set normalize folds to
-// a space and renderBlock strips, and content must be something outside it —
-// a heading that renders empty is an element the serializer drops, which
+// Every class here is spelled out, because \s, .trim() and .strip() are
+// different sets in the two runtimes: JS's also holds U+FEFF, Python's also hold
+// U+0085 and U+001C-U+001F. A character one runtime folds while the other keeps
+// is untouched text reading as an edit, or a turn page that refuses to send. WS
+// is what the two already agree on, which leaves those six as content in both.
+const WS = "[ \\t\\n\\r\\x0b\\x0c\\u00a0\\u1680\\u2000-\\u200a" +
+  "\\u2028\\u2029\\u202f\\u205f\\u3000]";
+const TRIM = new RegExp("^" + WS + "+|" + WS + "+$", "g");
+const TRIM_END = new RegExp(WS + "+$");
+const trim = (text) => text.replace(TRIM, "");
+const trimEnd = (text) => text.replace(TRIM_END, "");
+// The heading separator is narrower than WS on purpose: it is the set normalize
+// folds to a space and renderBlock strips, and content must be something outside
+// it — a heading that renders empty is an element the serializer drops, which
 // fails the round-trip check.
 const HEADING_LINE = /^#{1,6}[ \t\u00a0]+[^ \t\u00a0]/;
+// The heading's own trim, narrower than WS: renderBlock strips exactly the
+// separator HEADING_LINE admits, so the serializer has to put back exactly
+// that much. Trimming wider would drop text the block model calls content.
+const HEADING_TRIM = /^[ \t\u00a0]+|[ \t\u00a0]+$/g;
 // \d is the same hazard in a different class: every Unicode decimal digit in
 // Python, only 0-9 in JS. Spelled out, an Arabic-Indic marker is a paragraph in
 // both runtimes instead of a list in loop.py and a paragraph here.
-const LIST_LINE = /^(\s*)([-*]|[0-9]+\.)\s+/;
+const LIST_LINE = new RegExp("^(" + WS + "*)([-*]|[0-9]+\\.)" + WS + "+");
 // A table's signature, so it is spelled tightly: leading and trailing pipe, and
 // $ rather than loop.py's \Z, which is the same anchor here \u2014 Python's $ also
 // matches before a trailing newline. Everything ambiguous stays a paragraph,
@@ -260,7 +274,7 @@ function splitBlocks(doc) {
   while (i < lines.length) {
     const ln = lines[i];
     i += 1;                      // lines[i] is now the line under ln
-    const stripped = ln.trim();
+    const stripped = trim(ln);
     if (!fence && stripped.startsWith("```")) {
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
       fence = true; cur.push(ln); continue;
@@ -297,7 +311,7 @@ function splitBlocks(doc) {
 
 function blockKind(block) {
   const first = block.split("\n", 1)[0];
-  if (first.trimStart().startsWith("```")) return "fence";
+  if (trim(first).startsWith("```")) return "fence";
   if (HEADING_LINE.test(first)) return "heading";
   if (LIST_LINE.test(first)) return "list";
   if (parseTable(block)) return "table";
@@ -379,12 +393,9 @@ function tableMd(rows, aligns) {
   return out.join("\n");
 }
 
-// Trimmed with the class it just folded, rather than .trim()/.strip(): those two
-// disagree over U+0085 and U+001C-U+001F, which only Python drops, and U+FEFF,
-// which only JS drops. Either way one runtime eats a character the other keeps
-// and the block texts stop matching.
-const collapse = (line) =>
-  line.replace(/[ \t]+/g, " ").replace(/^[ \t]+|[ \t]+$/g, "");
+// ASCII runs fold to one space, and the ends go through WS rather than .trim(),
+// which would also take the six characters loop.py keeps.
+const collapse = (line) => trim(line.replace(/[ \t]+/g, " "));
 
 function parseListItems(lines) {
   // The first line always carries a marker — that is what made the block a
@@ -396,7 +407,7 @@ function parseListItems(lines) {
       items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
         text: l.slice(m[0].length) });
     } else if (items.length) {
-      items[items.length - 1].text += " " + l.trim();
+      items[items.length - 1].text += " " + collapse(l);
     }
   }
   return items;
@@ -413,7 +424,7 @@ function normalize(doc) {
     const kind = blockKind(b);
     const lines = b.split("\n");
     if (kind === "fence") {
-      out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
+      out.push(lines.map(trimEnd).join("\n"));
     } else if (kind === "table") {
       // One spelling per row, so pipe padding and hand alignment read as churn
       // rather than an edit — which is also what lets a table the reviewer
@@ -422,8 +433,8 @@ function normalize(doc) {
       out.push(tableMd(t.rows, t.aligns));
     } else if (kind === "list") {
       out.push(parseListItems(lines).map((it) =>
-        ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
-          collapse(it.text)).trimEnd()).join("\n"));
+        trimEnd("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
+          collapse(it.text))).join("\n"));
     } else {
       out.push(collapse(lines.join(" ")));
     }
@@ -477,14 +488,14 @@ function renderBlock(block, container) {
   if (kind === "fence") {
     const pre = document.createElement("pre");
     const code = document.createElement("code");
-    pre.dataset.lang = lines[0].trim().slice(3).trim();
-    code.textContent = lines.slice(1, lines[lines.length - 1].trim().startsWith("```")
+    pre.dataset.lang = trim(trim(lines[0]).slice(3));
+    code.textContent = lines.slice(1, trim(lines[lines.length - 1]).startsWith("```")
       ? lines.length - 1 : lines.length).join("\n");
     pre.appendChild(code); container.appendChild(pre);
   } else if (kind === "heading") {
     const level = lines[0].match(/^#{1,6}/)[0].length;
     const h = document.createElement("h" + level);
-    renderInline(lines[0].replace(/^#{1,6}\s+/, ""), h);
+    renderInline(lines[0].replace(/^#{1,6}[ \t\u00a0]+/, ""), h);
     container.appendChild(h);
   } else if (kind === "list") {
     const items = parseListItems(lines);
@@ -709,7 +720,8 @@ function serializeContainer(root, blocks) {
   const flushRun = () => {
     if (!run.length) return;
     const text = run.map(serializeInline).join("");
-    if (text.trim()) blocks.push(text.trim());
+    const flat = trim(text);
+    if (flat) blocks.push(flat);
     run = [];
   };
   for (const node of root.childNodes) {
@@ -717,7 +729,8 @@ function serializeContainer(root, blocks) {
       flushRun();
       const tag = node.tagName;
       if (/^H[1-6]$/.test(tag)) {
-        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        const t = Array.from(node.childNodes).map(serializeInline).join("")
+          .replace(HEADING_TRIM, "");
         if (t) blocks.push("#".repeat(+tag[1]) + " " + t);
       } else if (tag === "UL" || tag === "OL") {
         const lines = serializeList(node, 0);
@@ -729,7 +742,7 @@ function serializeContainer(root, blocks) {
         const t = serializeTable(node);
         if (t) blocks.push(t);
       } else {
-        const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
+        const t = trim(Array.from(node.childNodes).map(serializeInline).join(""));
         if (t) blocks.push(t);
       }
     } else run.push(node);

@@ -26,12 +26,15 @@
   twice, in `loop.py` and in `template.html`; both are now pinned to one vector
   list, and render/serialize are asserted to be inverses — the expression whose
   mismatch disables a turn page had no coverage at all.
-- **Exotic characters normalize the same way in both block models.** A list
-  marker written in Arabic-Indic digits was a list to the script and a paragraph
-  to the turn page, and a line carrying U+0085, U+FEFF or U+001C-U+001F lost that
-  character in one runtime and kept it in the other. Either way untouched text
-  came back reading as an edit. Both character classes are spelled out now, and
-  pinned to the shared vector list.
+- **Exotic characters read the same way in both block models.** The model is
+  written twice, and its implicit character classes were not the same sets on
+  the two sides: `\d` is every Unicode digit in Python and only `0-9` in the
+  browser, and the two runtimes' whitespace disagrees over U+0085, U+FEFF and
+  U+001C-U+001F. A document carrying any of them was split, classified or
+  trimmed differently on each side, so untouched text came back reading as an
+  edit — and a paragraph or heading edged with one made the turn page refuse to
+  send at all. Every class is spelled out now, as the set the two runtimes
+  already agree on, and pinned to the shared vector list.
 
 ## 0.1.1
 
