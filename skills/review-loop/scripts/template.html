@@ -73,6 +73,10 @@
     grid-template-columns: minmax(0, var(--measure)) 300px; gap: 2rem;
     padding: 1.2rem 1.5rem 4rem; }
   @media (max-width: 900px) { main { grid-template-columns: minmax(0, var(--measure)); } }
+  /* With nothing in the rail, its track would hold the document off-center, so
+     the rail leaves the layout until a thread or the comment form needs it. */
+  main.no-rail { grid-template-columns: minmax(0, var(--measure)); }
+  main.no-rail > aside { display: none; }
   .doc { min-height: 8rem; }
   .doc:focus-visible { outline: none; }
   #clean[contenteditable="true"] { border-left: 3px solid transparent; padding-left: .8rem; }
@@ -147,7 +151,6 @@
   #send-modal textarea { font: .78rem ui-monospace, Consolas, monospace; height: 9rem; }
   #send-status { font-size: .84rem; min-height: 1.2em; }
   .btn-row { display: flex; gap: .5rem; flex-wrap: wrap; }
-  .empty { color: var(--muted); font-style: italic; }
 </style>
 
 <div class="toolbar">
@@ -940,6 +943,7 @@ const clean = document.getElementById("clean");
 const changesEl = document.getElementById("changes");
 const noticesEl = document.getElementById("notices");
 const threadsEl = document.getElementById("threads");
+const mainEl = document.querySelector("main");
 let outgoing = [];          // reviewer-authored comments/replies this turn
 let resolvedLocal = [];     // thread ids the reviewer resolved this turn
 // Ids are unique by construction: threads always carry an earlier turn's
@@ -1203,6 +1207,7 @@ commentBtn.addEventListener("mousedown", (e) => {
   document.getElementById("form-quote").textContent =
     "On: " + quoted(anchorText, 80);
   form.style.display = "block";
+  syncRail();
   document.getElementById("form-body").value = "";
   document.getElementById("form-body").focus();
   hideCommentBtn();
@@ -1218,6 +1223,7 @@ document.getElementById("form-add").addEventListener("click", () => {
 });
 document.getElementById("form-cancel").addEventListener("click", () => {
   pendingAnchor = null; form.style.display = "none";
+  syncRail();
 });
 
 /* Serializer-transparent highlights: mark elements wrap commented text; the
@@ -1244,6 +1250,13 @@ clean.addEventListener("click", (e) => {
   setTimeout(() => card.classList.remove("flash"), 1200);
 });
 
+// Called wherever the rail's contents change — a render, or the comment form
+// opening on a page that has no threads yet.
+function syncRail() {
+  mainEl.classList.toggle("no-rail",
+    !threadsEl.children.length && form.style.display !== "block");
+}
+
 function renderThreads() {
   threadsEl.textContent = "";
   clearHighlights();
@@ -1260,13 +1273,6 @@ function renderThreads() {
   for (const c of outgoing.filter((c) => !c.reply_to)) {
     items.push({ id: c.id, anchor: c.anchor,
       messages: [{ author: "you", body: c.body, outgoingId: c.id }], existing: false });
-  }
-  if (!items.length) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "Select text in the document to comment on it.";
-    threadsEl.appendChild(d);
-    return;
   }
   for (const t of items) {
     const div = document.createElement("div");
@@ -1388,6 +1394,7 @@ function renderThreads() {
       r.surroundContents(mark);
     } catch (e) { /* overlapping selections — leave that slice unmarked */ }
   }
+  syncRail();
 }
 
 function selectAnchor(anchor) {

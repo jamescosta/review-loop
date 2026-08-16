@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- **The comment rail leaves the layout when it is empty.** A page with no
+  threads held a 300px column open under a line of placeholder text, pushing
+  the document off-center for the reading that most turns are. The rail now
+  claims its track only once a thread exists or the comment form opens, and the
+  document sits centered the rest of the time.
+
 ## 0.1.2
 
 - **Tables render as tables.** A pipe table was a paragraph of literal pipes,
