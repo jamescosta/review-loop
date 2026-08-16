@@ -34,7 +34,22 @@
     { "doc": "a | b\n--- | ---", "want": "a | b --- | ---" },
     { "doc": "|\n| --- |", "want": "| | --- |" },
     { "doc": "```\n| a | b |\n| --- | --- |\n```",
-      "want": "```\n| a | b |\n| --- | --- |\n```" }
+      "want": "```\n| a | b |\n| --- | --- |\n```" },
+
+    { "doc": "٣. item", "want": "٣. item" },
+    { "doc": "\ufeffalpha\u0085", "want": "\ufeffalpha\u0085" },
+    { "doc": "\u001calpha\u001f", "want": "\u001calpha\u001f" },
+
+    { "doc": "\ufeff- item", "want": "\ufeff- item" },
+    { "doc": "\u0085- item", "want": "\u0085- item" },
+    { "doc": "a\n\u0085\nb", "want": "a \u0085 b" },
+    { "doc": "a\n\ufeff\nb", "want": "a \ufeff b" },
+    { "doc": "```\nx\u0085\n```", "want": "```\nx\u0085\n```" },
+    { "doc": "```\nx\ufeff\n```", "want": "```\nx\ufeff\n```" },
+    { "doc": "- item\u0085", "want": "- item\u0085" },
+    { "doc": "- item\ufeff", "want": "- item\ufeff" },
+    { "doc": "- a\n  b\ufeff\n  c", "want": "- a b\ufeff c" },
+    { "doc": "- x\u2003\n  continued", "want": "- x continued" }
   ],
   "kind": [
     { "doc": "# Title", "want": "heading" },
@@ -53,7 +68,12 @@
     { "doc": "|\n| --- |", "want": "para" },
     { "doc": "| A |\n| --- | --- |", "want": "para" },
     { "doc": "| A | B |\n| --- |", "want": "para" },
-    { "doc": "| A | B |   \n| --- | --- |", "want": "table" }
+    { "doc": "| A | B |   \n| --- | --- |", "want": "table" },
+    { "doc": "٣. item", "want": "para" },
+    { "doc": "１. item", "want": "para" },
+
+    { "doc": "\u0085```", "want": "para" },
+    { "doc": "\ufeff```", "want": "para" }
   ],
   "roundtrip": [
     "# Title\n\nA paragraph with **bold**, *italic*, `code` and a [link](https://example.org).\n",
@@ -67,6 +87,10 @@
     "| a | b |\n| --- | --- |\n| x |  |\n|  |  |\n",
     "| a | b |\n| --- | --- |\n| 1 |\n| 1 | 2 | 3 |\n",
     "| **a** \\| b | [x](https://example.org) |\n| :---: | --- |\n| `c` | *d* |\n",
-    "prose above\n| a | b |\n| --- | --- |\n| 1 | 2 |\nprose below\n"
+    "prose above\n| a | b |\n| --- | --- |\n| 1 | 2 |\nprose below\n",
+
+    "\ufeffalpha\u0085\n",
+    "# \u2028Title\n",
+    "```\nx\n```\ufeff\n"
   ]
 }

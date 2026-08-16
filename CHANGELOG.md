@@ -26,6 +26,19 @@
   twice, in `loop.py` and in `template.html`; both are now pinned to one vector
   list, and render/serialize are asserted to be inverses — the expression whose
   mismatch disables a turn page had no coverage at all.
+- **Exotic characters read the same way in both block models.** The model is
+  written twice, and its implicit character classes were not the same sets on
+  the two sides: `\d` is every Unicode digit in Python and only `0-9` in the
+  browser, and the two runtimes' whitespace disagrees over U+0085, U+FEFF and
+  U+001C-U+001F. A document carrying any of them was split, classified or
+  trimmed differently on each side, so untouched text came back reading as an
+  edit — and a paragraph or heading edged with one made the turn page refuse to
+  send at all. Every class is spelled out now, as the set the two runtimes
+  already agree on, and pinned to the shared vector list.
+- **A fenced block's closing line survives the round trip.** Anything written
+  past the closing ticks was dropped on render and re-emitted as a bare fence,
+  so a document carrying one could not be sent back at all. It is preserved now,
+  the same way the opening line's info string already was.
 
 ## 0.1.1
 

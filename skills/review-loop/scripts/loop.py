@@ -59,13 +59,35 @@ def fnv1a(text):
 # split_blocks / block_kind / normalize are mirrored in template.html; the
 # two implementations must stay identical or the round-trip check lies.
 
-# Spelled out rather than \s: the two runtimes disagree on which exotic
-# characters that class covers. The separator is the set normalize folds to
-# a space and the page's renderer strips, and content must be something
-# outside it — a heading that renders empty is an element the serializer
-# drops, which fails the page's round-trip check.
+# Every class here is spelled out, because \s, .strip() and .trim() are
+# different sets in the two runtimes: Python's also hold U+0085 and
+# U+001C-U+001F, JS's also holds U+FEFF. A character one runtime folds while
+# the other keeps is untouched text reading as an edit, or a turn page that
+# refuses to send. WS is what the two already agree on, which leaves those six
+# as content in both — the reading that costs a document nothing.
+WS = (r"[ \t\n\r\x0b\x0c\xa0\u1680\u2000-\u200a"
+      r"\u2028\u2029\u202f\u205f\u3000]")
+TRIM = re.compile(r"^{0}+|{0}+$".format(WS))
+TRIM_END = re.compile(r"{0}+$".format(WS))
+
+
+def trim(text):
+    return TRIM.sub("", text)
+
+
+def trim_end(text):
+    return TRIM_END.sub("", text)
+
+
+# The heading separator is narrower than WS on purpose: it is the set normalize
+# folds to a space and the page's renderer strips, and content must be something
+# outside it — a heading that renders empty is an element the serializer drops,
+# which fails the page's round-trip check.
 HEADING_LINE = re.compile(r"^#{1,6}[ \t\xa0]+[^ \t\xa0]")
-LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
+# \d is the same hazard in a different class: every Unicode decimal digit in
+# Python, only 0-9 in JS. Spelled out, an Arabic-Indic marker is a paragraph
+# in both runtimes instead of a list here and a paragraph on the page.
+LIST_LINE = re.compile(r"^({0}*)([-*]|[0-9]+\.){0}+".format(WS))
 # A table's signature, so it is spelled tightly: leading and trailing pipe, and
 # \Z rather than $, which in Python — unlike JS — also matches before a trailing
 # newline. Everything ambiguous stays a paragraph, which is what the loop did
@@ -80,7 +102,7 @@ def split_blocks(doc):
     while i < len(lines):
         ln = lines[i]
         i += 1                       # lines[i] is now the line under ln
-        stripped = ln.strip()
+        stripped = trim(ln)
         if not fence and stripped.startswith("```"):
             if cur:
                 blocks.append("\n".join(cur))
@@ -128,7 +150,7 @@ def split_blocks(doc):
 
 def block_kind(block):
     first = block.split("\n", 1)[0]
-    if first.lstrip().startswith("```"):
+    if trim(first).startswith("```"):
         return "fence"
     if HEADING_LINE.match(first):
         return "heading"
@@ -237,7 +259,9 @@ def table_row_md(cells):
 
 
 def collapse(line):
-    return re.sub(r"[ \t]+", " ", line).strip()
+    # ASCII runs fold to one space, and the ends go through WS rather than
+    # .strip(), which would also take the six characters the page keeps.
+    return trim(re.sub(r"[ \t]+", " ", line))
 
 
 def normalize(doc):
@@ -249,7 +273,7 @@ def normalize(doc):
         kind = block_kind(b)
         lines = b.split("\n")
         if kind == "fence":
-            out.append("\n".join(l.rstrip() for l in lines))
+            out.append("\n".join(trim_end(l) for l in lines))
         elif kind == "table":
             # One spelling per row, so pipe padding and hand alignment read as
             # churn rather than an edit — which is also what lets a table the
@@ -268,8 +292,8 @@ def normalize(doc):
                 if m:
                     level = len(m.group(1)) // 2
                     marker = "1." if m.group(2)[0].isdigit() else "-"
-                    items.append(("  " * level + marker + " " +
-                                  collapse(l[m.end():])).rstrip())
+                    items.append(trim_end("  " * level + marker + " " +
+                                          collapse(l[m.end():])))
                 elif items:
                     items[-1] += " " + c
                 else:
