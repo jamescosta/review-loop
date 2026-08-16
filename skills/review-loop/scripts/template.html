@@ -123,6 +123,12 @@
     padding: .4rem; margin-top: .4rem; }
   .thread .reply-row { display: flex; gap: .4rem; margin-top: .3rem; }
   .remove-comment { margin-left: auto; font-size: .7rem; padding: .05rem .35rem; }
+  .doc table { border-collapse: collapse; margin: .5rem 0; }
+  .doc th, .doc td { border: 1px solid var(--border); padding: .3rem .55rem;
+    text-align: left; vertical-align: top; }
+  .doc th { background: var(--panel); font-weight: 600; }
+  .doc [data-align="center"] { text-align: center; }
+  .doc [data-align="right"] { text-align: right; }
   #comment-btn { position: absolute; z-index: 20; display: none;
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
     font-size: .78rem; padding: .2rem .55rem; }
@@ -222,10 +228,19 @@ const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
 // fails the round-trip check.
 const HEADING_LINE = /^#{1,6}[ \t\u00a0]+[^ \t\u00a0]/;
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
+// A table's signature, so it is spelled tightly: leading and trailing pipe, and
+// $ rather than loop.py's \Z, which is the same anchor here \u2014 Python's $ also
+// matches before a trailing newline. Everything ambiguous stays a paragraph,
+// which is what the loop did with tables before it rendered them at all.
+const TABLE_DELIM = /^\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$/;
 
 function splitBlocks(doc) {
   const blocks = []; let cur = []; let fence = false;
-  for (const ln of doc.split("\n")) {
+  const lines = doc.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const ln = lines[i];
+    i += 1;                      // lines[i] is now the line under ln
     const stripped = ln.trim();
     if (!fence && stripped.startsWith("```")) {
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
@@ -245,6 +260,16 @@ function splitBlocks(doc) {
       // one back out of a block it shares with body text.
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
       blocks.push(ln);
+    } else if (ln.startsWith("|") && i < lines.length && TABLE_DELIM.test(lines[i])) {
+      // A table stands alone for the same reason, taking every pipe line under
+      // its delimiter row with it. This is what keeps splitBlocks and blockKind
+      // agreeing: the two lines that make a table can never be left sitting
+      // inside a paragraph.
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+      let j = i + 1;
+      while (j < lines.length && lines[j].startsWith("|")) j += 1;
+      blocks.push(lines.slice(i - 1, j).join("\n"));
+      i = j;
     } else cur.push(ln);
   }
   if (cur.length) blocks.push(cur.join("\n"));
@@ -256,7 +281,82 @@ function blockKind(block) {
   if (first.trimStart().startsWith("```")) return "fence";
   if (HEADING_LINE.test(first)) return "heading";
   if (LIST_LINE.test(first)) return "list";
+  if (parseTable(block)) return "table";
   return "para";
+}
+
+/* ------------------------------------------------------------------- tables
+   One parser, read by blockKind, normalize and renderBlock alike, so none of
+   the three can disagree about what a table is. It returns null rather than
+   throwing: renderMarkdown runs above every other statement on this page, so a
+   throw there would take the artifact down before the self-check has run. */
+const ALIGN_MARK = { "": "---", left: ":---", center: ":---:", right: "---:" };
+
+function splitCells(line) {
+  // A hand-rolled walk rather than a lookbehind: a lookbehind literal is a
+  // parse-time error in older browsers, which takes down every document rather
+  // than just this one. An escaped pipe is content; nothing else is special.
+  const cells = []; let buf = ""; let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === "\\" && line[i + 1] === "|") { buf += "|"; i += 2; continue; }
+    if (ch === "|") { cells.push(buf); buf = ""; } else buf += ch;
+    i += 1;
+  }
+  cells.push(buf);
+  return cells;
+}
+
+// Spelled out rather than \s, and folding newlines too: a cell is one line of
+// markdown, so a break the browser left inside one must fold like any other
+// space, or emitting it would end the row early and strand the rest of the
+// table as a paragraph.
+const cellText = (text) => text.replace(/[ \t\r\n]+/g, " ")
+  .replace(/^[ \t\r\n]+/, "").replace(/[ \t\r\n]+$/, "");
+
+function rowCells(line) {
+  // The split leaves an empty field either side of the row's own pipes: the
+  // leading one always, the trailing one only when the row closes with a pipe,
+  // which GFM leaves optional.
+  const cells = splitCells(line).slice(1);
+  if (cells.length && cells[cells.length - 1] === "") cells.pop();
+  return cells.map(cellText);
+}
+
+function cellAlign(spec) {
+  // The delimiter cell arrives collapsed, so its colons sit at the ends.
+  const left = spec.startsWith(":"), right = spec.endsWith(":");
+  if (left && right) return "center";
+  if (left) return "left";
+  if (right) return "right";
+  return "";
+}
+
+function parseTable(block) {
+  const lines = block.split("\n");
+  if (lines.length < 2 || !TABLE_DELIM.test(lines[1])) return null;
+  for (const l of lines) if (!l.startsWith("|")) return null;
+  const rows = [lines[0]].concat(lines.slice(2)).map((l) => rowCells(l));
+  // A header with no columns leaves nothing to rebuild the delimiter row from,
+  // and a table whose delimiter row is gone is not one.
+  if (!rows[0].length) return null;
+  // The delimiter row holds nothing but the alignments, so it is rebuilt at the
+  // header's width \u2014 the width serializeTable emits it at.
+  const aligns = rowCells(lines[1]).map(cellAlign);
+  while (aligns.length < rows[0].length) aligns.push("");
+  return { rows, aligns: aligns.slice(0, rows[0].length) };
+}
+
+function tableRowMd(cells) {
+  // Every cell is emitted padded, so its content never touches a pipe and a
+  // cell ending in a backslash cannot escape the border beside it.
+  return "| " + cells.map((c) => c.replace(/\|/g, "\\|")).join(" | ") + " |";
+}
+
+function tableMd(rows, aligns) {
+  const out = [tableRowMd(rows[0]), tableRowMd(aligns.map((a) => ALIGN_MARK[a]))];
+  for (const r of rows.slice(1)) out.push(tableRowMd(r));
+  return out.join("\n");
 }
 
 const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
@@ -289,6 +389,12 @@ function normalize(doc) {
     const lines = b.split("\n");
     if (kind === "fence") {
       out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
+    } else if (kind === "table") {
+      // One spelling per row, so pipe padding and hand alignment read as churn
+      // rather than an edit — which is also what lets a table the reviewer
+      // never touched keep the raw text the agent wrote.
+      const t = parseTable(b);
+      out.push(tableMd(t.rows, t.aligns));
     } else if (kind === "list") {
       out.push(parseListItems(lines).map((it) =>
         ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
@@ -321,6 +427,23 @@ function renderInline(text, parent) {
     } else { buf += text[i]; i += 1; }
   }
   flush();
+}
+
+function renderRow(cells, aligns, tag) {
+  const tr = document.createElement("tr");
+  for (let i = 0; i < cells.length; i += 1) {
+    const cell = document.createElement(tag);
+    // dataset rather than an attribute or a style: it is what the test rig's
+    // DOM shim implements, and what pre.dataset.lang already uses.
+    if (aligns[i]) cell.dataset.align = aligns[i];
+    // An empty cell holding no node has nowhere to put a caret and no text for
+    // an anchor to land on, so a comment on one would be dropped in silence.
+    // canonicalize turns the break back into the space it stands for.
+    if (cells[i]) renderInline(cells[i], cell);
+    else cell.appendChild(document.createElement("br"));
+    tr.appendChild(cell);
+  }
+  return tr;
 }
 
 function renderBlock(block, container) {
@@ -359,6 +482,16 @@ function renderBlock(block, container) {
       renderInline(item.text, li);
       top().list.appendChild(li);
     }
+  } else if (kind === "table") {
+    const { rows, aligns } = parseTable(block);
+    const table = document.createElement("table");
+    const head = document.createElement("thead");
+    head.appendChild(renderRow(rows[0], aligns, "th"));
+    table.appendChild(head);
+    const body = document.createElement("tbody");
+    for (const r of rows.slice(1)) body.appendChild(renderRow(r, aligns, "td"));
+    table.appendChild(body);
+    container.appendChild(table);
   } else {
     const p = document.createElement("p");
     renderInline(lines.join(" "), p);
@@ -379,8 +512,15 @@ function renderMarkdown(md, container) {
    subtrees are left alone — the serializer emits their text verbatim, so
    rewriting inside them would rewrite the markdown. */
 const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
-  "UL", "OL", "PRE"]);
+  "UL", "OL", "PRE", "TABLE"]);
 const VERBATIM_TAGS = new Set(["PRE", "CODE"]);
+// What docTextAndMap breaks anchor text on, which is not the same question:
+// without a break after every cell, neighbouring cells run together into words
+// that appear nowhere on the page and evidence()'s whole-word rule has no
+// whitespace left to find. The cell tags stay out of BLOCK_TAGS itself, which
+// also decides what serializeContainer treats as a block of its own.
+const TEXT_BREAK_TAGS = new Set([...BLOCK_TAGS,
+  "THEAD", "TBODY", "TR", "TH", "TD"]);
 
 function hasBlockChild(el) {
   return Array.from(el.children).some((c) => BLOCK_TAGS.has(c.tagName));
@@ -460,6 +600,28 @@ function serializeList(listEl, depth) {
   return lines;
 }
 
+function serializeTable(tableEl) {
+  // Rows are gathered at any depth, so a thead, a tbody, or whatever wrapper
+  // the browser decided to add cannot hide them.
+  const rows = [];
+  (function walk(el) {
+    for (const child of el.children) {
+      if (child.tagName === "TR") rows.push(child);
+      else walk(child);
+    }
+  })(tableEl);
+  const cellsOf = (tr) => Array.from(tr.children)
+    .filter((c) => c.tagName === "TH" || c.tagName === "TD");
+  if (!rows.length || !cellsOf(rows[0]).length) return "";
+  const lines = rows.map((tr) => tableRowMd(cellsOf(tr).map((c) =>
+    cellText(Array.from(c.childNodes).map(serializeInline).join("")))));
+  // The delimiter row is structure rather than content, so it never exists as
+  // a node: it is rebuilt from the header's alignments and width.
+  lines.splice(1, 0, tableRowMd(cellsOf(rows[0]).map((c) =>
+    ALIGN_MARK[c.dataset.align || ""])));
+  return lines.join("\n");
+}
+
 function serializeContainer(root, blocks) {
   let run = [];
   const flushRun = () => {
@@ -481,6 +643,9 @@ function serializeContainer(root, blocks) {
       } else if (tag === "PRE") {
         const lang = node.dataset.lang || "";
         blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
+      } else if (tag === "TABLE") {
+        const t = serializeTable(node);
+        if (t) blocks.push(t);
       } else {
         const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
         if (t) blocks.push(t);
@@ -559,7 +724,7 @@ function docTextAndMap(root) {
       if (child.nodeType === 3) { map.push({ node: child, start: text.length }); text += child.nodeValue; }
       else if (child.nodeType === 1) {
         walk(child);
-        if (BLOCK_TAGS.has(child.tagName)) text += "\n";
+        if (TEXT_BREAK_TAGS.has(child.tagName)) text += "\n";
       }
     }
   })(root);

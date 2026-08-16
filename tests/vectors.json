@@ -8,7 +8,27 @@
     { "doc": "#hashtag\nmore", "want": "#hashtag more" },
     { "doc": "  # indented\nmore", "want": "# indented more" },
     { "doc": "- a\n# H\n- b", "want": "- a\n\n# H\n\n- b" },
-    { "doc": "```\n# fenced\n```", "want": "```\n# fenced\n```" }
+    { "doc": "```\n# fenced\n```", "want": "```\n# fenced\n```" },
+
+    { "doc": "|a|b|\n|:---|---:|\n|  1  |2|",
+      "want": "| a | b |\n| :--- | ---: |\n| 1 | 2 |" },
+    { "doc": "| a b |\n|\t:-:\t|\n| \tx\t |",
+      "want": "| a b |\n| :---: |\n| x |" },
+    { "doc": "intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\ntail",
+      "want": "intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\ntail" },
+    { "doc": "| a | b |\n| --- | --- |\n| 1 |\n| 1 | 2 | 3 |",
+      "want": "| a | b |\n| --- | --- |\n| 1 |\n| 1 | 2 | 3 |" },
+    { "doc": "| a | b |\n| --- | --- |\n|  |  |",
+      "want": "| a | b |\n| --- | --- |\n|  |  |" },
+    { "doc": "| a \\| b | c |\n| --- | --- |",
+      "want": "| a \\| b | c |\n| --- | --- |" },
+    { "doc": "| `a|b` | c |\n| --- | --- |",
+      "want": "| `a | b` | c |\n| --- | --- | --- |" },
+    { "doc": "| a | b\n| --- | --- |", "want": "| a | b |\n| --- | --- |" },
+    { "doc": "a | b\n--- | ---", "want": "a | b --- | ---" },
+    { "doc": "|\n| --- |", "want": "| | --- |" },
+    { "doc": "```\n| a | b |\n| --- | --- |\n```",
+      "want": "```\n| a | b |\n| --- | --- |\n```" }
   ],
   "kind": [
     { "doc": "# Title", "want": "heading" },
@@ -16,13 +36,28 @@
     { "doc": "- a\n- b", "want": "list" },
     { "doc": "1. a\n2. b", "want": "list" },
     { "doc": "```py\nx = 1\n```", "want": "fence" },
-    { "doc": "plain words", "want": "para" }
+    { "doc": "plain words", "want": "para" },
+
+    { "doc": "| a | b |\n| --- | --- |\n| 1 | 2 |", "want": "table" },
+    { "doc": "| a | b |\n| :---: | ---: |", "want": "table" },
+    { "doc": "| a | b |\nnot a delimiter row", "want": "para" },
+    { "doc": "| a | b |", "want": "para" },
+    { "doc": "  | a |\n  | --- |", "want": "para" },
+    { "doc": "| a | b |\n| -- x |", "want": "para" },
+    { "doc": "|\n| --- |", "want": "para" }
   ],
   "roundtrip": [
     "# Title\n\nA paragraph with **bold**, *italic*, `code` and a [link](https://example.org).\n",
     "## Heading two\n\n- one\n- two\n  - nested\n  - also nested\n- three\n",
     "1. first\n2. second\n   1. inner\n",
     "Intro.\n\n```py\nx = 1\n\ny = 2\n```\n\nOutro.\n",
-    "###### H6\n\nText under the smallest heading.\n"
+    "###### H6\n\nText under the smallest heading.\n",
+
+    "| Item | Cost |\n| :--- | ---: |\n| Beds | 1200 |\n| Soil | 600 |\n",
+    "Intro line.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nOutro line.\n",
+    "| a | b |\n| --- | --- |\n| x |  |\n|  |  |\n",
+    "| a | b |\n| --- | --- |\n| 1 |\n| 1 | 2 | 3 |\n",
+    "| **a** \\| b | [x](https://example.org) |\n| :---: | --- |\n| `c` | *d* |\n",
+    "prose above\n| a | b |\n| --- | --- |\n| 1 | 2 |\nprose below\n"
   ]
 }

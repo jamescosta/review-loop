@@ -66,11 +66,20 @@ def fnv1a(text):
 # drops, which fails the page's round-trip check.
 HEADING_LINE = re.compile(r"^#{1,6}[ \t\xa0]+[^ \t\xa0]")
 LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
+# A table's signature, so it is spelled tightly: leading and trailing pipe, and
+# \Z rather than $, which in Python — unlike JS — also matches before a trailing
+# newline. Everything ambiguous stays a paragraph, which is what the loop did
+# with tables before it rendered them at all.
+TABLE_DELIM = re.compile(r"^\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*\Z")
 
 
 def split_blocks(doc):
     blocks, cur, fence = [], [], False
-    for ln in doc.split("\n"):
+    lines = doc.split("\n")
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        i += 1                       # lines[i] is now the line under ln
         stripped = ln.strip()
         if not fence and stripped.startswith("```"):
             if cur:
@@ -97,6 +106,19 @@ def split_blocks(doc):
                 blocks.append("\n".join(cur))
                 cur = []
             blocks.append(ln)
+        elif ln.startswith("|") and i < len(lines) and TABLE_DELIM.match(lines[i]):
+            # A table stands alone for the same reason, taking every pipe line
+            # under its delimiter row with it. This is what keeps split_blocks
+            # and block_kind agreeing: the two lines that make a table can
+            # never be left sitting inside a paragraph.
+            if cur:
+                blocks.append("\n".join(cur))
+                cur = []
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("|"):
+                j += 1
+            blocks.append("\n".join(lines[i - 1:j]))
+            i = j
         else:
             cur.append(ln)
     if cur:
@@ -112,7 +134,104 @@ def block_kind(block):
         return "heading"
     if LIST_LINE.match(first):
         return "list"
+    if parse_table(block) is not None:
+        return "table"
     return "para"
+
+
+# ------------------------------------------------------------------- tables
+# One parser, read by block_kind, normalize and the page's renderer alike, so
+# none of the three can disagree about what a table is. It returns None rather
+# than raising: on the page a throw in the renderer takes the whole artifact
+# down before the self-check has run.
+
+ALIGN_MARK = {"": "---", "left": ":---", "center": ":---:", "right": "---:"}
+CELL_SPACE = re.compile(r"[ \t\r\n]+")
+
+
+def split_cells(line):
+    # A hand-rolled walk rather than a lookbehind: the JS mirror would need one,
+    # and a lookbehind literal is a parse-time error in older browsers, which
+    # takes down every document rather than just this one. An escaped pipe is
+    # content; nothing else is special.
+    cells, buf, i = [], [], 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and i + 1 < len(line) and line[i + 1] == "|":
+            buf.append("|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    cells.append("".join(buf))
+    return cells
+
+
+def cell_text(text):
+    # Spelled out rather than \s, and folding newlines too: a cell is one line
+    # of markdown, so a break the browser left inside one must fold like any
+    # other space, or emitting it would end the row early and strand the rest
+    # of the table as a paragraph.
+    return CELL_SPACE.sub(" ", text).strip(" \t\r\n")
+
+
+def row_cells(line):
+    # The split leaves an empty field either side of the row's own pipes: the
+    # leading one always, the trailing one only when the row closes with a pipe,
+    # which GFM leaves optional.
+    cells = split_cells(line)[1:]
+    if cells and cells[-1] == "":
+        cells.pop()
+    return [cell_text(c) for c in cells]
+
+
+def cell_align(spec):
+    # The delimiter cell arrives collapsed, so its colons sit at the ends.
+    left, right = spec.startswith(":"), spec.endswith(":")
+    if left and right:
+        return "center"
+    if left:
+        return "left"
+    if right:
+        return "right"
+    return ""
+
+
+def parse_table(block):
+    """A table's header and body rows as cell lists, plus one alignment per
+    column — or None if the block is not a table."""
+    lines = block.split("\n")
+    if len(lines) < 2 or not TABLE_DELIM.match(lines[1]):
+        return None
+    if any(not l.startswith("|") for l in lines):
+        return None
+    rows = [row_cells(l) for l in lines[:1] + lines[2:]]
+    if not rows[0]:
+        # A header with no columns leaves nothing to rebuild the delimiter row
+        # from, and a table whose delimiter row is gone is not one.
+        return None
+    # The delimiter row holds nothing but the alignments, so it is rebuilt at
+    # the header's width — the width the page's serializer emits it at.
+    aligns = [cell_align(c) for c in row_cells(lines[1])]
+    return rows, (aligns + [""] * len(rows[0]))[:len(rows[0])]
+
+
+def table_md(rows, aligns):
+    """The canonical spelling of a table: one space of padding per cell, and a
+    delimiter row carrying only the alignments."""
+    out = [table_row_md(rows[0]), table_row_md([ALIGN_MARK[a] for a in aligns])]
+    out += [table_row_md(r) for r in rows[1:]]
+    return "\n".join(out)
+
+
+def table_row_md(cells):
+    # Every cell is emitted padded, so its content never touches a pipe and a
+    # cell ending in a backslash cannot escape the border beside it.
+    return "| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |"
 
 
 def collapse(line):
@@ -129,6 +248,12 @@ def normalize(doc):
         lines = b.split("\n")
         if kind == "fence":
             out.append("\n".join(l.rstrip() for l in lines))
+        elif kind == "table":
+            # One spelling per row, so pipe padding and hand alignment read as
+            # churn rather than an edit — which is also what lets a table the
+            # reviewer never touched keep the raw text the agent wrote.
+            rows, aligns = parse_table(b)
+            out.append(table_md(rows, aligns))
         elif kind == "list":
             # Canonical markers and 2-space nesting; continuation lines merge
             # into their item, so soft-wrap churn is not an edit.
