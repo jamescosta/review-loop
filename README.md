@@ -13,13 +13,17 @@ stays clean markdown with the whole history in git.
 
 | Need | Why |
 | :--- | :--- |
-| Claude Code or Claude Cowork | Runs the skill and publishes the turn page |
+| Claude Code | Runs the skill and publishes the turn page |
 | Python 3 | The scripts, standard library only — nothing to install |
 | git 2.28 or newer | The turn history; `init` creates the repo with `git init -b` |
 | A desktop browser | Where the reviewer reads the turn page and marks it up |
 
 **GitHub is not required.** git runs locally on your machine — no account, no
 remote, no push. The turn history lives in the project folder.
+
+**Cowork is not on this list yet.** The plugin installs there, but whether a
+Cowork session can run a turn has not been established — see the Cowork
+section below for exactly what is and is not known.
 
 ## Install
 
@@ -69,7 +73,8 @@ on a document.
 markdown file of your own works the same way.
 
 1. Ask Claude: *start a review loop on `sample/doc.md` — tighten it and cut the
-   repetition.*
+   repetition.* Say who you are in that first message if you want the turns
+   committed under your name; without one they are attributed to "Reviewer".
 2. Claude sets up the project, takes the first pass, publishes the turn page,
    and gives you the URL along with a summary of what changed and any questions
    — those live in chat, not on the page.
