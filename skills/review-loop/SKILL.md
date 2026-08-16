@@ -15,8 +15,9 @@ Never edit `.review/` state by hand.
 ## First run on a machine
 
 The scripts need only Python 3 (standard library, nothing to install) and
-git on PATH; publishing needs the Artifact tool; the reviewer needs a
-desktop browser. Before the first project on a machine, confirm the two
+git on PATH; publishing needs a surface that can publish an artifact page —
+the Artifact tool in Claude Code, Cowork's artifact surface otherwise; the
+reviewer needs a desktop browser. Before the first project on a machine, confirm the two
 commands exist:
 
 ```
@@ -88,6 +89,14 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
    unchanged across turns). The first publish: record the URL in
    `PROJECT/.review/artifact-url.txt`. In a later session, pass that URL as
    the Artifact tool's `url` parameter so the redeploy targets the same page.
+
+   **In Cowork there is no Artifact tool.** Publish the same file through
+   Cowork's artifact surface instead, and hold to the same invariants: one
+   artifact, redeployed every turn — never a new one per turn — and its
+   reference recorded in `PROJECT/.review/artifact-url.txt` in place of a
+   claude.ai URL. The Cowork execution filesystem is session-scoped, so
+   before the session ends, offer to write the finished document out to one
+   of the user's connected folders.
 4. Tell the reviewer the artifact URL and the turn number, and give the
    turn's summary and your questions **in chat** — the page deliberately
    carries neither. If a tab was already open, they must refresh (the page's
