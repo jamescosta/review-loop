@@ -34,7 +34,11 @@
     { "doc": "a | b\n--- | ---", "want": "a | b --- | ---" },
     { "doc": "|\n| --- |", "want": "| | --- |" },
     { "doc": "```\n| a | b |\n| --- | --- |\n```",
-      "want": "```\n| a | b |\n| --- | --- |\n```" }
+      "want": "```\n| a | b |\n| --- | --- |\n```" },
+
+    { "doc": "٣. item", "want": "٣. item" },
+    { "doc": "\ufeffalpha\u0085", "want": "\ufeffalpha\u0085" },
+    { "doc": "\u001calpha\u001f", "want": "\u001calpha\u001f" }
   ],
   "kind": [
     { "doc": "# Title", "want": "heading" },
@@ -53,7 +57,9 @@
     { "doc": "|\n| --- |", "want": "para" },
     { "doc": "| A |\n| --- | --- |", "want": "para" },
     { "doc": "| A | B |\n| --- |", "want": "para" },
-    { "doc": "| A | B |   \n| --- | --- |", "want": "table" }
+    { "doc": "| A | B |   \n| --- | --- |", "want": "table" },
+    { "doc": "٣. item", "want": "para" },
+    { "doc": "１. item", "want": "para" }
   ],
   "roundtrip": [
     "# Title\n\nA paragraph with **bold**, *italic*, `code` and a [link](https://example.org).\n",
