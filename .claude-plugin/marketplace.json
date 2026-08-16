@@ -1,0 +1,15 @@
+{
+  "name": "jamescosta",
+  "description": "The review-loop skill, distributed from its own repository.",
+  "owner": {
+    "name": "James Costa",
+    "url": "https://github.com/jamescosta"
+  },
+  "plugins": [
+    {
+      "name": "review-loop",
+      "source": "./",
+      "description": "Turn-based document collaboration loop — the agent edits a markdown document under git, publishes each turn as an editable artifact with the changes visible, and applies the reviewer's returned markup as the human turn."
+    }
+  ]
+}
