@@ -130,7 +130,11 @@ path. The empirical check is to run one turn in a Cowork session and see.
   `scripts/template.html` (the turn page).
 - `.claude-plugin/` — `plugin.json` and the `marketplace.json` that makes this
   repository its own plugin marketplace.
-- `tests/` — guard and normalization tests (`python -m pytest tests`).
+- `tests/` — guard and normalization tests for the loop
+  (`python -m pytest tests`), plus `tests/matcher/`, which replays the turn
+  page's own anchor matcher under a DOM shim (`node tests/matcher/check.js`,
+  `node tests/matcher/drift.js`, `python tests/matcher/mutate.py`). Node runs
+  that rig; the skill itself never needs it.
 - `sample/doc.md` — synthetic sample document for trying the loop.
 
 Design of record: Notion page "Review-loop prototype — skill + artifact
