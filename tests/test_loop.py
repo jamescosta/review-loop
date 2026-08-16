@@ -119,6 +119,25 @@ def test_split_blocks_needs_a_delimiter_row_under_the_header():
         assert loop.block_kind(doc) == "para", doc
 
 
+def test_block_kind_rejects_a_header_delimiter_width_mismatch():
+    # GFM reads neither of these as a table, so neither does the loop: showing
+    # a table where the document has a paragraph would rewrite the row to the
+    # matched width on the reviewer's first edit.
+    for doc in ("| A |\n| --- | --- |\n| 1 | 2 |", "| A | B |\n| --- |\n| 1 | 2 |"):
+        assert loop.block_kind(doc) == "para", doc
+
+
+def test_row_cells_ignores_whitespace_after_the_closing_pipe():
+    # Trailing whitespace is ordinary in hand-written markdown; counted as a
+    # field it grows a column the document does not have — and, once the widths
+    # have to match, silently demotes the whole table to a paragraph.
+    assert loop.row_cells("| A | B |   ") == ["A", "B"]
+    assert loop.row_cells("| A | B |\t") == ["A", "B"]
+    assert loop.block_kind("| A | B |  \n| --- | --- |") == "table"
+    # A row that genuinely ends without its closing pipe still keeps its cells.
+    assert loop.row_cells("| A | B  ") == ["A", "B"]
+
+
 def test_split_blocks_ignores_table_rows_inside_fences():
     assert loop.split_blocks("```\n| a |\n| --- |\n```\n| b |\n| --- |") == [
         "```\n| a |\n| --- |\n```", "| b |\n| --- |"]

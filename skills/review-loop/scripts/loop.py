@@ -182,8 +182,10 @@ def cell_text(text):
 def row_cells(line):
     # The split leaves an empty field either side of the row's own pipes: the
     # leading one always, the trailing one only when the row closes with a pipe,
-    # which GFM leaves optional.
-    cells = split_cells(line)[1:]
+    # which GFM leaves optional. Whitespace past that closing pipe is not a cell
+    # — left on, it becomes the final field and the row grows a column the
+    # document does not have.
+    cells = split_cells(line.rstrip(" \t\r\n"))[1:]
     if cells and cells[-1] == "":
         cells.pop()
     return [cell_text(c) for c in cells]
@@ -210,14 +212,14 @@ def parse_table(block):
     if any(not l.startswith("|") for l in lines):
         return None
     rows = [row_cells(l) for l in lines[:1] + lines[2:]]
-    if not rows[0]:
-        # A header with no columns leaves nothing to rebuild the delimiter row
-        # from, and a table whose delimiter row is gone is not one.
-        return None
-    # The delimiter row holds nothing but the alignments, so it is rebuilt at
-    # the header's width — the width the page's serializer emits it at.
     aligns = [cell_align(c) for c in row_cells(lines[1])]
-    return rows, (aligns + [""] * len(rows[0]))[:len(rows[0])]
+    if len(aligns) != len(rows[0]):
+        # GFM does not read a header and a delimiter row of different widths as
+        # a table at all. Padding or truncating one to the other would show the
+        # reviewer a table where the document has a paragraph, and rewrite the
+        # row to that width on the first edit.
+        return None
+    return rows, aligns
 
 
 def table_md(rows, aligns):

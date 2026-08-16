@@ -330,8 +330,10 @@ const cellText = (text) => text.replace(/[ \t\r\n]+/g, " ")
 function rowCells(line) {
   // The split leaves an empty field either side of the row's own pipes: the
   // leading one always, the trailing one only when the row closes with a pipe,
-  // which GFM leaves optional.
-  const cells = splitCells(line).slice(1);
+  // which GFM leaves optional. Whitespace past that closing pipe is not a cell
+  // — left on, it becomes the final field and the row grows a column the
+  // document does not have.
+  const cells = splitCells(line.replace(/[ \t\r\n]+$/, "")).slice(1);
   if (cells.length && cells[cells.length - 1] === "") cells.pop();
   return cells.map(cellText);
 }
@@ -350,14 +352,13 @@ function parseTable(block) {
   if (lines.length < 2 || !TABLE_DELIM.test(lines[1])) return null;
   for (const l of lines) if (!l.startsWith("|")) return null;
   const rows = [lines[0]].concat(lines.slice(2)).map((l) => rowCells(l));
-  // A header with no columns leaves nothing to rebuild the delimiter row from,
-  // and a table whose delimiter row is gone is not one.
-  if (!rows[0].length) return null;
-  // The delimiter row holds nothing but the alignments, so it is rebuilt at the
-  // header's width \u2014 the width serializeTable emits it at.
   const aligns = rowCells(lines[1]).map(cellAlign);
-  while (aligns.length < rows[0].length) aligns.push("");
-  return { rows, aligns: aligns.slice(0, rows[0].length) };
+  // GFM does not read a header and a delimiter row of different widths as a
+  // table at all. Padding or truncating one to the other would show the
+  // reviewer a table where the document has a paragraph, and rewrite the row to
+  // that width on the first edit.
+  if (aligns.length !== rows[0].length) return null;
+  return { rows, aligns };
 }
 
 function tableRowMd(cells) {
