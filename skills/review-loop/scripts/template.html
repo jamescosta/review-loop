@@ -133,6 +133,10 @@
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
     font-size: .78rem; padding: .2rem .55rem; }
   #comment-form { display: none; border-color: var(--accent); }
+  #table-tools { position: absolute; z-index: 20; display: none; gap: .25rem;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: .2rem; box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+  #table-tools button { font-size: .72rem; padding: .1rem .4rem; }
   mark.rl-hl { background: color-mix(in srgb, var(--accent) 22%, transparent);
     color: inherit; border-bottom: 2px solid var(--accent); cursor: pointer; }
   #send-modal { display: none; position: fixed; inset: 0;
@@ -186,6 +190,15 @@
 </main>
 
 <button id="comment-btn">💬 Comment</button>
+
+<div id="table-tools">
+  <button data-table-op="row-above" title="Insert a row above">&#8593; Row</button>
+  <button data-table-op="row-below" title="Insert a row below">&#8595; Row</button>
+  <button data-table-op="col-left" title="Insert a column to the left">&#8592; Col</button>
+  <button data-table-op="col-right" title="Insert a column to the right">&#8594; Col</button>
+  <button data-table-op="row-delete" title="Delete this row">&#10005; Row</button>
+  <button data-table-op="col-delete" title="Delete this column">&#10005; Col</button>
+</div>
 
 <div id="send-modal">
   <div class="box">
@@ -600,9 +613,9 @@ function serializeList(listEl, depth) {
   return lines;
 }
 
-function serializeTable(tableEl) {
-  // Rows are gathered at any depth, so a thead, a tbody, or whatever wrapper
-  // the browser decided to add cannot hide them.
+function tableRows(tableEl) {
+  // Gathered at any depth, so a thead, a tbody, or whatever wrapper the browser
+  // decided to add cannot hide a row from the serializer or the row controls.
   const rows = [];
   (function walk(el) {
     for (const child of el.children) {
@@ -610,14 +623,27 @@ function serializeTable(tableEl) {
       else walk(child);
     }
   })(tableEl);
-  const cellsOf = (tr) => Array.from(tr.children)
+  return rows;
+}
+
+function tableCells(tr) {
+  return Array.from(tr.children)
     .filter((c) => c.tagName === "TH" || c.tagName === "TD");
-  if (!rows.length || !cellsOf(rows[0]).length) return "";
-  const lines = rows.map((tr) => tableRowMd(cellsOf(tr).map((c) =>
-    cellText(Array.from(c.childNodes).map(serializeInline).join("")))));
+}
+
+function serializeTable(tableEl) {
+  const rows = tableRows(tableEl);
+  if (!rows.length || !tableCells(rows[0]).length) return "";
+  // A block child inside a cell is where the reviewer pressed Enter — some
+  // engines leave a div per line rather than a break — so it is worth the space
+  // that keeps its two lines from fusing into one word.
+  const cellMd = (c) => cellText(Array.from(c.childNodes).map((n) =>
+    (n.nodeType === 1 && BLOCK_TAGS.has(n.tagName) ? " " : "") +
+    serializeInline(n)).join(""));
+  const lines = rows.map((tr) => tableRowMd(tableCells(tr).map(cellMd)));
   // The delimiter row is structure rather than content, so it never exists as
   // a node: it is rebuilt from the header's alignments and width.
-  lines.splice(1, 0, tableRowMd(cellsOf(rows[0]).map((c) =>
+  lines.splice(1, 0, tableRowMd(tableCells(rows[0]).map((c) =>
     ALIGN_MARK[c.dataset.align || ""])));
   return lines.join("\n");
 }
@@ -982,9 +1008,133 @@ function setView(which) {
   btnClean.setAttribute("aria-pressed", String(which === "clean"));
   btnChanges.setAttribute("aria-pressed", String(which === "changes"));
   hideCommentBtn();
+  hideTableTools();
 }
 btnClean.addEventListener("click", () => setView("clean"));
 btnChanges.addEventListener("click", () => setView("changes"));
+
+/* ---------------------------------------------------------- table editing
+   Rows and columns are structure, and a browser left to itself in a
+   contenteditable table invents shapes markdown has no spelling for. These six
+   do the surgery instead, on tables the renderer built, so what comes back is
+   always a table. Cell text stays ordinary editable content, and no key is
+   intercepted — every interception is another way to reach a round-trip the
+   serializer cannot express. */
+const tableTools = document.getElementById("table-tools");
+let toolCell = null;             // the cell the tools currently act on
+
+function hideTableTools() {
+  if (tableTools.style.display === "flex") tableTools.style.display = "none";
+  toolCell = null;
+}
+
+function newCell(tag, align) {
+  const cell = document.createElement(tag);
+  if (align) cell.dataset.align = align;
+  cell.appendChild(document.createElement("br"));
+  return cell;
+}
+
+function caretInto(cell) {
+  if (!cell) return;
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+document.addEventListener("selectionchange", () => {
+  // Cheap checks before the rect: this fires on every caret move while typing.
+  const sel = window.getSelection();
+  const node = sel && sel.anchorNode;
+  const el = node && (node.nodeType === 3 ? node.parentNode : node);
+  const cell = el && el.closest ? el.closest("th, td") : null;
+  if (!cell || !selfCheckOK || clean.hidden || !clean.contains(cell) ||
+      !clean.offsetParent) return hideTableTools();
+  toolCell = cell;
+  const table = cell.closest("table");
+  const rows = tableRows(table);
+  // The header row defines the table's shape, and a table with no columns left
+  // is not one — so those two deletions are refused rather than performed.
+  tableTools.querySelector('[data-table-op="row-delete"]').disabled =
+    rows.indexOf(cell.parentNode) === 0;
+  tableTools.querySelector('[data-table-op="col-delete"]').disabled =
+    tableCells(rows[0]).length < 2;
+  const rect = table.getBoundingClientRect();
+  tableTools.style.display = "flex";
+  tableTools.style.top = (window.scrollY + rect.top - 30) + "px";
+  tableTools.style.left = (window.scrollX + rect.left) + "px";
+});
+
+function insertRow(table, at) {
+  // Always a body row: the header is what the delimiter row is rebuilt from,
+  // so nothing may be inserted above it.
+  const header = tableCells(tableRows(table)[0]);
+  const tr = document.createElement("tr");
+  for (const h of header) tr.appendChild(newCell("td", h.dataset.align));
+  const body = table.querySelector("tbody") || table;
+  const ref = tableRows(table)[at];
+  if (ref && ref.parentNode === body) body.insertBefore(tr, ref);
+  else body.appendChild(tr);
+}
+
+function insertColumn(table, at) {
+  for (const tr of tableRows(table)) {
+    const cells = tableCells(tr);
+    // A new column carries no alignment, and a row too short to reach the
+    // insertion point simply grows at its own end.
+    const cell = newCell(cells.length && cells[0].tagName === "TH" ? "th" : "td", "");
+    if (at < cells.length) tr.insertBefore(cell, cells[at]);
+    else tr.appendChild(cell);
+  }
+}
+
+tableTools.addEventListener("mousedown", (e) => {
+  // mousedown rather than click, preventing default, so pressing a button never
+  // takes the caret out of the cell the operation is about to read.
+  const btn = e.target.closest ? e.target.closest("[data-table-op]") : null;
+  if (!btn || btn.disabled) return;
+  e.preventDefault();
+  const cell = toolCell;
+  const table = cell && cell.closest("table");
+  if (!table || !clean.contains(table)) return;
+  const at = tableRows(table).indexOf(cell.parentNode);
+  const col = tableCells(cell.parentNode).indexOf(cell);
+  let row = at, column = col;
+  switch (btn.dataset.tableOp) {
+    case "row-above": row = Math.max(1, at); insertRow(table, row); break;
+    case "row-below": row = at + 1; insertRow(table, row); break;
+    case "col-left": insertColumn(table, col); break;
+    case "col-right": column = col + 1; insertColumn(table, column); break;
+    // The two refusals are re-checked here rather than trusted to the disabled
+    // buttons: those are set on selectionchange, so a second press landing
+    // before the next one would otherwise take the header row or the last
+    // column with it.
+    case "row-delete":
+      if (at < 1) return;
+      cell.parentNode.remove();
+      row = Math.min(at, tableRows(table).length - 1);
+      break;
+    case "col-delete":
+      if (tableCells(tableRows(table)[0]).length < 2) return;
+      for (const tr of tableRows(table)) {
+        const c = tableCells(tr)[col];
+        if (c) c.remove();
+      }
+      column = Math.min(col, tableCells(tableRows(table)[0]).length - 1);
+      break;
+    default: return;
+  }
+  // Highlights live inside cells, so they are re-placed before the caret is:
+  // renderThreads rewrites the mark elements the caret would sit among. The
+  // autosave hangs off the input event, which a programmatic edit never fires.
+  renderThreads();
+  const rows = tableRows(table);
+  caretInto(rows[row] && tableCells(rows[row])[column]);
+  scheduleSave();
+});
 
 /* -------------------------------------------------------------- comments */
 const commentBtn = document.getElementById("comment-btn");
