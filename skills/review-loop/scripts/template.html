@@ -404,8 +404,11 @@ function parseListItems(lines) {
   for (const l of lines) {
     const m = LIST_LINE.exec(l);
     if (m) {
-      items.push({ level: Math.floor(m[1].length / 2), ordered: /^\d/.test(m[2]),
-        text: l.slice(m[0].length) });
+      // Collapsed here rather than after the joins below, because that is where
+      // loop.py collapses it: left raw, a separator at this line's end stays
+      // interior once a continuation is appended and survives as a second space.
+      items.push({ level: Math.floor(m[1].length / 2), ordered: /^[0-9]/.test(m[2]),
+        text: collapse(l.slice(m[0].length)) });
     } else if (items.length) {
       items[items.length - 1].text += " " + collapse(l);
     }
@@ -489,8 +492,13 @@ function renderBlock(block, container) {
     const pre = document.createElement("pre");
     const code = document.createElement("code");
     pre.dataset.lang = trim(trim(lines[0]).slice(3));
-    code.textContent = lines.slice(1, trim(lines[lines.length - 1]).startsWith("```")
-      ? lines.length - 1 : lines.length).join("\n");
+    const closer = lines[lines.length - 1];
+    const closed = lines.length > 1 && trim(closer).startsWith("```");
+    // Anything past the closing ticks is text normalize keeps, so the serializer
+    // has to be able to put it back. Only the unusual spelling is recorded.
+    if (closed && closer !== "```") pre.dataset.close = closer;
+    code.textContent = lines.slice(1, closed ? lines.length - 1 : lines.length)
+      .join("\n");
     pre.appendChild(code); container.appendChild(pre);
   } else if (kind === "heading") {
     const level = lines[0].match(/^#{1,6}/)[0].length;
@@ -737,7 +745,9 @@ function serializeContainer(root, blocks) {
         if (lines.length) blocks.push(lines.join("\n"));
       } else if (tag === "PRE") {
         const lang = node.dataset.lang || "";
-        blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
+        const closer = node.dataset.close || "```";
+        blocks.push("```" + lang + "\n" +
+          node.textContent.replace(/\n$/, "") + "\n" + closer);
       } else if (tag === "TABLE") {
         const t = serializeTable(node);
         if (t) blocks.push(t);

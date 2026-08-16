@@ -48,7 +48,8 @@
     { "doc": "```\nx\ufeff\n```", "want": "```\nx\ufeff\n```" },
     { "doc": "- item\u0085", "want": "- item\u0085" },
     { "doc": "- item\ufeff", "want": "- item\ufeff" },
-    { "doc": "- a\n  b\ufeff\n  c", "want": "- a b\ufeff c" }
+    { "doc": "- a\n  b\ufeff\n  c", "want": "- a b\ufeff c" },
+    { "doc": "- x\u2003\n  continued", "want": "- x continued" }
   ],
   "kind": [
     { "doc": "# Title", "want": "heading" },
@@ -89,6 +90,7 @@
     "prose above\n| a | b |\n| --- | --- |\n| 1 | 2 |\nprose below\n",
 
     "\ufeffalpha\u0085\n",
-    "# \u2028Title\n"
+    "# \u2028Title\n",
+    "```\nx\n```\ufeff\n"
   ]
 }
