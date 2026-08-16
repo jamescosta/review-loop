@@ -929,10 +929,12 @@ if (fnv1a(DATA.baseDoc) !== DATA.checksum) {
     "the self-check failed so it can rebuild the turn.");
 } else if (normalize(serialize(clean)) !== normalize(DATA.baseDoc)) {
   selfCheckOK = false;
+  // Rebuilding alone re-embeds the same document and lands on the same dead
+  // page, so the advice has to point at the markdown rather than the turn.
   notice("danger", "<strong>Self-check failed:</strong> this page cannot faithfully " +
     "capture edits to this document (round-trip mismatch). Don't review here — " +
-    "tell the agent the self-check failed so it can rebuild the turn. " +
-    "This turn will not be used.");
+    "tell the agent the self-check failed, so it can repair the document itself " +
+    "before rebuilding. This turn will not be used.");
 }
 if (!selfCheckOK) {
   clean.setAttribute("contenteditable", "false");
@@ -1432,8 +1434,32 @@ refreshSendChannels();
   } catch (e) { /* cannot probe — the click fallbacks still catch failure */ }
 })();
 
+/* The load-time self-check only ever sees the base document, and the checksum
+   on the blob below certifies transport rather than fidelity — so nothing has
+   been watching what the reviewer's own edits serialize to. This does: markdown
+   the page cannot render back to itself would be committed as the next turn's
+   base, and the failure would surface a turn later, on a page that rebuilding
+   cannot fix because the corrupt base is already in the file. */
+function unrenderable(doc) {
+  const box = document.createElement("div");
+  renderMarkdown(doc, box);
+  return serialize(box) !== doc;
+}
+
+let sendBlocked = null;         // the standing "not sent" notice, if any
+
 document.getElementById("send-btn").addEventListener("click", () => {
   const doc = serialize(clean);
+  if (sendBlocked) { sendBlocked.remove(); sendBlocked = null; }
+  if (unrenderable(doc)) {
+    statusEl.textContent = "";
+    sendBlocked = notice("danger", "<strong>Not sent:</strong> an edit has left the " +
+      "document in a shape this page cannot read back — usually an unclosed code " +
+      "fence, or a stray pipe or line break inside a table cell. Undo the last edit " +
+      "and try again.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
   blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc),
     baseChecksum: DATA.checksum, docName: DATA.docName, doc,
     comments: outgoing, resolved: resolvedLocal });
