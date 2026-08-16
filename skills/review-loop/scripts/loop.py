@@ -65,7 +65,10 @@ def fnv1a(text):
 # outside it — a heading that renders empty is an element the serializer
 # drops, which fails the page's round-trip check.
 HEADING_LINE = re.compile(r"^#{1,6}[ \t\xa0]+[^ \t\xa0]")
-LIST_LINE = re.compile(r"^(\s*)([-*]|\d+\.)\s+")
+# \d is the same hazard in a different class: every Unicode decimal digit in
+# Python, only 0-9 in JS. Spelled out, an Arabic-Indic marker is a paragraph
+# in both runtimes instead of a list here and a paragraph on the page.
+LIST_LINE = re.compile(r"^(\s*)([-*]|[0-9]+\.)\s+")
 # A table's signature, so it is spelled tightly: leading and trailing pipe, and
 # \Z rather than $, which in Python — unlike JS — also matches before a trailing
 # newline. Everything ambiguous stays a paragraph, which is what the loop did
@@ -235,7 +238,11 @@ def table_row_md(cells):
 
 
 def collapse(line):
-    return re.sub(r"[ \t]+", " ", line).strip()
+    # Trimmed with the class it just folded, rather than .strip()/.trim():
+    # those two disagree over U+0085 and U+001C-U+001F, which only Python
+    # drops, and U+FEFF, which only JS drops. Either way one runtime eats a
+    # character the other keeps and the block texts stop matching.
+    return re.sub(r"^[ \t]+|[ \t]+$", "", re.sub(r"[ \t]+", " ", line))
 
 
 def normalize(doc):

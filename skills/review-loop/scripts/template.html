@@ -240,7 +240,10 @@ const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
 // a heading that renders empty is an element the serializer drops, which
 // fails the round-trip check.
 const HEADING_LINE = /^#{1,6}[ \t\u00a0]+[^ \t\u00a0]/;
-const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
+// \d is the same hazard in a different class: every Unicode decimal digit in
+// Python, only 0-9 in JS. Spelled out, an Arabic-Indic marker is a paragraph in
+// both runtimes instead of a list in loop.py and a paragraph here.
+const LIST_LINE = /^(\s*)([-*]|[0-9]+\.)\s+/;
 // A table's signature, so it is spelled tightly: leading and trailing pipe, and
 // $ rather than loop.py's \Z, which is the same anchor here \u2014 Python's $ also
 // matches before a trailing newline. Everything ambiguous stays a paragraph,
@@ -372,7 +375,12 @@ function tableMd(rows, aligns) {
   return out.join("\n");
 }
 
-const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
+// Trimmed with the class it just folded, rather than .trim()/.strip(): those two
+// disagree over U+0085 and U+001C-U+001F, which only Python drops, and U+FEFF,
+// which only JS drops. Either way one runtime eats a character the other keeps
+// and the block texts stop matching.
+const collapse = (line) =>
+  line.replace(/[ \t]+/g, " ").replace(/^[ \t]+|[ \t]+$/g, "");
 
 function parseListItems(lines) {
   // The first line always carries a marker — that is what made the block a

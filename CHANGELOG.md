@@ -18,6 +18,12 @@
   twice, in `loop.py` and in `template.html`; both are now pinned to one vector
   list, and render/serialize are asserted to be inverses — the expression whose
   mismatch disables a turn page had no coverage at all.
+- **Exotic characters normalize the same way in both block models.** A list
+  marker written in Arabic-Indic digits was a list to the script and a paragraph
+  to the turn page, and a line carrying U+0085, U+FEFF or U+001C-U+001F lost that
+  character in one runtime and kept it in the other. Either way untouched text
+  came back reading as an edit. Both character classes are spelled out now, and
+  pinned to the shared vector list.
 
 ## 0.1.1
 
