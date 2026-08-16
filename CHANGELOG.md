@@ -35,6 +35,10 @@
   edit — and a paragraph or heading edged with one made the turn page refuse to
   send at all. Every class is spelled out now, as the set the two runtimes
   already agree on, and pinned to the shared vector list.
+- **A fenced block's closing line survives the round trip.** Anything written
+  past the closing ticks was dropped on render and re-emitted as a bare fence,
+  so a document carrying one could not be sent back at all. It is preserved now,
+  the same way the opening line's info string already was.
 
 ## 0.1.1
 
