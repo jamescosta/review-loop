@@ -663,6 +663,11 @@ function insertRow(tableEl, at) {
 function insertColumn(tableEl, at) {
   for (const tr of tableRows(tableEl)) {
     const tag = tableCells(tr)[0] && tableCells(tr)[0].tagName === "TH" ? "th" : "td";
+    // A row that does not reach the insertion point is padded out to it first.
+    // Without that its new cell lands wherever its own length puts it, which is
+    // a different column from the one the reviewer inserted beside — and what
+    // they type there is then serialized under the wrong heading.
+    while (tableCells(tr).length < at) tr.appendChild(newCell(tag, ""));
     const cells = tableCells(tr);
     const cell = newCell(tag, "");        // a new column carries no alignment
     if (at < cells.length) tr.insertBefore(cell, cells[at]);

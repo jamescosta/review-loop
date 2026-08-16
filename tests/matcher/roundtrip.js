@@ -59,5 +59,27 @@ for (const md of docs) {
   check(`round trip ${label(md)}`, got, mod.normalize(md));
 }
 
+// The row and column controls, driven through the same functions the buttons
+// call. A ragged table is the case worth pinning: a row shorter than the
+// insertion point has to be padded out to it, or its new cell lands under a
+// different heading than the one the reviewer inserted beside.
+function afterEdit(md, edit) {
+  const root = document.createElement("div");
+  mod.renderMarkdown(md, root);
+  edit(root.childNodes.find((n) => n.tagName === "TABLE"));
+  return mod.serialize(root).trim();
+}
+
+const ragged = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| short |\n";
+check("insertColumn pads a short row through the insertion point",
+  afterEdit(ragged, (t) => mod.insertColumn(t, 3)),
+  "| A | B | C |  |\n| --- | --- | --- | --- |\n| 1 | 2 | 3 |  |\n| short |  |  |  |");
+check("insertColumn in the middle keeps every row aligned",
+  afterEdit("| A | B |\n| :--- | ---: |\n| 1 | 2 |\n", (t) => mod.insertColumn(t, 1)),
+  "| A |  | B |\n| :--- | --- | ---: |\n| 1 |  | 2 |");
+check("insertRow adds a body row at the header's width and alignments",
+  afterEdit("| A | B |\n| :--- | ---: |\n| 1 | 2 |\n", (t) => mod.insertRow(t, 1)),
+  "| A | B |\n| :--- | ---: |\n|  |  |\n| 1 | 2 |");
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
