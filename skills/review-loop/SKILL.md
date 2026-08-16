@@ -64,7 +64,10 @@ LF, commits the import under the reviewer's identity, and prepares `.review/`
 ## The agent turn
 
 1. **Edit the document file** per the ask. Keep to the rendered markdown
-   subset: headings, bold/italic, lists, links, code.
+   subset: headings, bold/italic, lists, links, code, tables. A table is
+   recognized only when every one of its lines starts with a pipe, the row
+   under the header is a delimiter row (`| --- | :---: |`), and none of it is
+   indented; anything else stays the paragraph it looks like.
 2. Commit the pass and stamp it as the current turn's base — the summary
    becomes the commit message:
 

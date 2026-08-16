@@ -14,6 +14,11 @@ import loop  # noqa: E402
 
 LOOP = str(SCRIPTS / "loop.py")
 
+# Shared with tests/matcher/roundtrip.js, which asserts the same vectors against
+# template.html's mirror of the block model. One list, both runtimes.
+VECTORS = json.loads((Path(__file__).parent / "vectors.json")
+                     .read_text(encoding="utf-8"))
+
 
 def write_lf(path, text):
     # Deliberately independent of loop.write_text: fixtures must not depend
@@ -97,19 +102,55 @@ def test_split_blocks_ignores_heading_lines_inside_fences():
         "```\n# fenced\n```", "# after"]
 
 
+def test_split_blocks_gives_a_table_its_own_block():
+    doc = "intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\ntail"
+    assert loop.split_blocks(doc) == [
+        "intro", "| a | b |\n| --- | --- |\n| 1 | 2 |", "tail"]
+
+
+def test_split_blocks_needs_a_delimiter_row_under_the_header():
+    # The delimiter row is the signature, so anything short of one leaves the
+    # pipes as the paragraph text they were before tables rendered at all.
+    for doc in ("| a | b |\nnot a delimiter row",
+                "| a | b |",
+                "| a | b |\n| -- x |",
+                "  | a |\n  | --- |"):
+        assert loop.split_blocks(doc) == [doc], doc
+        assert loop.block_kind(doc) == "para", doc
+
+
+def test_block_kind_rejects_a_header_delimiter_width_mismatch():
+    # GFM reads neither of these as a table, so neither does the loop: showing
+    # a table where the document has a paragraph would rewrite the row to the
+    # matched width on the reviewer's first edit.
+    for doc in ("| A |\n| --- | --- |\n| 1 | 2 |", "| A | B |\n| --- |\n| 1 | 2 |"):
+        assert loop.block_kind(doc) == "para", doc
+
+
+def test_row_cells_ignores_whitespace_after_the_closing_pipe():
+    # Trailing whitespace is ordinary in hand-written markdown; counted as a
+    # field it grows a column the document does not have — and, once the widths
+    # have to match, silently demotes the whole table to a paragraph.
+    assert loop.row_cells("| A | B |   ") == ["A", "B"]
+    assert loop.row_cells("| A | B |\t") == ["A", "B"]
+    assert loop.block_kind("| A | B |  \n| --- | --- |") == "table"
+    # A row that genuinely ends without its closing pipe still keeps its cells.
+    assert loop.row_cells("| A | B  ") == ["A", "B"]
+
+
+def test_split_blocks_ignores_table_rows_inside_fences():
+    assert loop.split_blocks("```\n| a |\n| --- |\n```\n| b |\n| --- |") == [
+        "```\n| a |\n| --- |\n```", "| b |\n| --- |"]
+
+
 def test_normalize_pinned_vectors():
-    # Pinned; template.html's normalize() must produce the same for each.
-    for doc, want in [
-        ("# Title\ntrailing text", "# Title\n\ntrailing text"),
-        ("intro\n# Title\nbody", "intro\n\n# Title\n\nbody"),
-        ("###### H6\ntext", "###### H6\n\ntext"),
-        ("####### seven\ntext", "####### seven text"),
-        ("#hashtag\nmore", "#hashtag more"),
-        ("  # indented\nmore", "# indented more"),
-        ("- a\n# H\n- b", "- a\n\n# H\n\n- b"),
-        ("```\n# fenced\n```", "```\n# fenced\n```"),
-    ]:
-        assert loop.normalize(doc) == want, doc
+    for v in VECTORS["normalize"]:
+        assert loop.normalize(v["doc"]) == v["want"], v["doc"]
+
+
+def test_block_kind_pinned_vectors():
+    for v in VECTORS["kind"]:
+        assert loop.block_kind(v["doc"]) == v["want"], v["doc"]
 
 
 # ------------------------------------------------------------- checksum
@@ -155,6 +196,14 @@ def test_block_diff_lists_never_word_merge():
     assert [p["t"] for p in d] == ["del", "ins"]
 
 
+def test_block_diff_tables_never_word_merge():
+    # A table's structure is its markers, so word-level markers spliced through
+    # one would leave the changes view unable to re-render it as a table.
+    old = "| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+    new = "| a | b |\n| --- | --- |\n| 1 | 9 |\n"
+    assert [p["t"] for p in loop.block_diff(old, new)] == ["del", "ins"]
+
+
 def test_block_diff_separates_a_heading_from_the_line_under_it():
     # The heading is its own block, so an edit below it never drags the
     # heading into the changed pair.
@@ -176,6 +225,25 @@ def test_reconstruct_ignores_dom_churn_but_applies_edits():
     # Churn-only paragraph keeps the base's raw text; edited list is replaced.
     assert "one  two\nthree" in result
     assert "- z" in result and "- y" not in result
+    assert stats["changed"] == 1
+
+
+def test_reconstruct_keeps_an_untouched_table_verbatim():
+    # The page emits one canonical spelling, so a table the reviewer never
+    # touched comes back respelled. Normalizing both sides makes that churn
+    # rather than an edit, and the agent's own hand alignment survives.
+    base = "| Item | Cost |\n| :---- | -----: |\n| Beds  | 1200   |\n"
+    returned = "| Item | Cost |\n| :--- | ---: |\n| Beds | 1200 |\n"
+    result, stats = loop.reconstruct(base, returned)
+    assert result == base
+    assert stats == {"changed": 0, "inserted": 0, "deleted": 0}
+
+
+def test_reconstruct_applies_an_edited_table_cell():
+    base = "| Item | Cost |\n| --- | --- |\n| Beds | 1200 |\n"
+    returned = "| Item | Cost |\n| --- | --- |\n| Beds | 1400 |\n"
+    result, stats = loop.reconstruct(base, returned)
+    assert "| Beds | 1400 |" in result
     assert stats["changed"] == 1
 
 

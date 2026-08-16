@@ -123,10 +123,20 @@
     padding: .4rem; margin-top: .4rem; }
   .thread .reply-row { display: flex; gap: .4rem; margin-top: .3rem; }
   .remove-comment { margin-left: auto; font-size: .7rem; padding: .05rem .35rem; }
+  .doc table { border-collapse: collapse; margin: .5rem 0; }
+  .doc th, .doc td { border: 1px solid var(--border); padding: .3rem .55rem;
+    text-align: left; vertical-align: top; }
+  .doc th { background: var(--panel); font-weight: 600; }
+  .doc [data-align="center"] { text-align: center; }
+  .doc [data-align="right"] { text-align: right; }
   #comment-btn { position: absolute; z-index: 20; display: none;
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
     font-size: .78rem; padding: .2rem .55rem; }
   #comment-form { display: none; border-color: var(--accent); }
+  #table-tools { position: absolute; z-index: 20; display: none; gap: .25rem;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: .2rem; box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+  #table-tools button { font-size: .72rem; padding: .1rem .4rem; }
   mark.rl-hl { background: color-mix(in srgb, var(--accent) 22%, transparent);
     color: inherit; border-bottom: 2px solid var(--accent); cursor: pointer; }
   #send-modal { display: none; position: fixed; inset: 0;
@@ -181,6 +191,15 @@
 
 <button id="comment-btn">💬 Comment</button>
 
+<div id="table-tools">
+  <button data-table-op="row-above" title="Insert a row above">&#8593; Row</button>
+  <button data-table-op="row-below" title="Insert a row below">&#8595; Row</button>
+  <button data-table-op="col-left" title="Insert a column to the left">&#8592; Col</button>
+  <button data-table-op="col-right" title="Insert a column to the right">&#8594; Col</button>
+  <button data-table-op="row-delete" title="Delete this row">&#10005; Row</button>
+  <button data-table-op="col-delete" title="Delete this column">&#10005; Col</button>
+</div>
+
 <div id="send-modal">
   <div class="box">
     <strong>Send review</strong>
@@ -222,10 +241,19 @@ const NBSP_RE = /\u00A0/g;  // DOM text uses nbsp where markdown uses space
 // fails the round-trip check.
 const HEADING_LINE = /^#{1,6}[ \t\u00a0]+[^ \t\u00a0]/;
 const LIST_LINE = /^(\s*)([-*]|\d+\.)\s+/;
+// A table's signature, so it is spelled tightly: leading and trailing pipe, and
+// $ rather than loop.py's \Z, which is the same anchor here \u2014 Python's $ also
+// matches before a trailing newline. Everything ambiguous stays a paragraph,
+// which is what the loop did with tables before it rendered them at all.
+const TABLE_DELIM = /^\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$/;
 
 function splitBlocks(doc) {
   const blocks = []; let cur = []; let fence = false;
-  for (const ln of doc.split("\n")) {
+  const lines = doc.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const ln = lines[i];
+    i += 1;                      // lines[i] is now the line under ln
     const stripped = ln.trim();
     if (!fence && stripped.startsWith("```")) {
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
@@ -245,6 +273,16 @@ function splitBlocks(doc) {
       // one back out of a block it shares with body text.
       if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
       blocks.push(ln);
+    } else if (ln.startsWith("|") && i < lines.length && TABLE_DELIM.test(lines[i])) {
+      // A table stands alone for the same reason, taking every pipe line under
+      // its delimiter row with it. This is what keeps splitBlocks and blockKind
+      // agreeing: the two lines that make a table can never be left sitting
+      // inside a paragraph.
+      if (cur.length) { blocks.push(cur.join("\n")); cur = []; }
+      let j = i + 1;
+      while (j < lines.length && lines[j].startsWith("|")) j += 1;
+      blocks.push(lines.slice(i - 1, j).join("\n"));
+      i = j;
     } else cur.push(ln);
   }
   if (cur.length) blocks.push(cur.join("\n"));
@@ -256,7 +294,83 @@ function blockKind(block) {
   if (first.trimStart().startsWith("```")) return "fence";
   if (HEADING_LINE.test(first)) return "heading";
   if (LIST_LINE.test(first)) return "list";
+  if (parseTable(block)) return "table";
   return "para";
+}
+
+/* ------------------------------------------------------------------- tables
+   One parser, read by blockKind, normalize and renderBlock alike, so none of
+   the three can disagree about what a table is. It returns null rather than
+   throwing: renderMarkdown runs above every other statement on this page, so a
+   throw there would take the artifact down before the self-check has run. */
+const ALIGN_MARK = { "": "---", left: ":---", center: ":---:", right: "---:" };
+
+function splitCells(line) {
+  // A hand-rolled walk rather than a lookbehind: a lookbehind literal is a
+  // parse-time error in older browsers, which takes down every document rather
+  // than just this one. An escaped pipe is content; nothing else is special.
+  const cells = []; let buf = ""; let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === "\\" && line[i + 1] === "|") { buf += "|"; i += 2; continue; }
+    if (ch === "|") { cells.push(buf); buf = ""; } else buf += ch;
+    i += 1;
+  }
+  cells.push(buf);
+  return cells;
+}
+
+// Spelled out rather than \s, and folding newlines too: a cell is one line of
+// markdown, so a break the browser left inside one must fold like any other
+// space, or emitting it would end the row early and strand the rest of the
+// table as a paragraph.
+const cellText = (text) => text.replace(/[ \t\r\n]+/g, " ")
+  .replace(/^[ \t\r\n]+/, "").replace(/[ \t\r\n]+$/, "");
+
+function rowCells(line) {
+  // The split leaves an empty field either side of the row's own pipes: the
+  // leading one always, the trailing one only when the row closes with a pipe,
+  // which GFM leaves optional. Whitespace past that closing pipe is not a cell
+  // — left on, it becomes the final field and the row grows a column the
+  // document does not have.
+  const cells = splitCells(line.replace(/[ \t\r\n]+$/, "")).slice(1);
+  if (cells.length && cells[cells.length - 1] === "") cells.pop();
+  return cells.map(cellText);
+}
+
+function cellAlign(spec) {
+  // The delimiter cell arrives collapsed, so its colons sit at the ends.
+  const left = spec.startsWith(":"), right = spec.endsWith(":");
+  if (left && right) return "center";
+  if (left) return "left";
+  if (right) return "right";
+  return "";
+}
+
+function parseTable(block) {
+  const lines = block.split("\n");
+  if (lines.length < 2 || !TABLE_DELIM.test(lines[1])) return null;
+  for (const l of lines) if (!l.startsWith("|")) return null;
+  const rows = [lines[0]].concat(lines.slice(2)).map((l) => rowCells(l));
+  const aligns = rowCells(lines[1]).map(cellAlign);
+  // GFM does not read a header and a delimiter row of different widths as a
+  // table at all. Padding or truncating one to the other would show the
+  // reviewer a table where the document has a paragraph, and rewrite the row to
+  // that width on the first edit.
+  if (aligns.length !== rows[0].length) return null;
+  return { rows, aligns };
+}
+
+function tableRowMd(cells) {
+  // Every cell is emitted padded, so its content never touches a pipe and a
+  // cell ending in a backslash cannot escape the border beside it.
+  return "| " + cells.map((c) => c.replace(/\|/g, "\\|")).join(" | ") + " |";
+}
+
+function tableMd(rows, aligns) {
+  const out = [tableRowMd(rows[0]), tableRowMd(aligns.map((a) => ALIGN_MARK[a]))];
+  for (const r of rows.slice(1)) out.push(tableRowMd(r));
+  return out.join("\n");
 }
 
 const collapse = (line) => line.replace(/[ \t]+/g, " ").trim();
@@ -289,6 +403,12 @@ function normalize(doc) {
     const lines = b.split("\n");
     if (kind === "fence") {
       out.push(lines.map((l) => l.replace(/\s+$/, "")).join("\n"));
+    } else if (kind === "table") {
+      // One spelling per row, so pipe padding and hand alignment read as churn
+      // rather than an edit — which is also what lets a table the reviewer
+      // never touched keep the raw text the agent wrote.
+      const t = parseTable(b);
+      out.push(tableMd(t.rows, t.aligns));
     } else if (kind === "list") {
       out.push(parseListItems(lines).map((it) =>
         ("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
@@ -321,6 +441,23 @@ function renderInline(text, parent) {
     } else { buf += text[i]; i += 1; }
   }
   flush();
+}
+
+function renderRow(cells, aligns, tag) {
+  const tr = document.createElement("tr");
+  for (let i = 0; i < cells.length; i += 1) {
+    const cell = document.createElement(tag);
+    // dataset rather than an attribute or a style: it is what the test rig's
+    // DOM shim implements, and what pre.dataset.lang already uses.
+    if (aligns[i]) cell.dataset.align = aligns[i];
+    // An empty cell holding no node has nowhere to put a caret and no text for
+    // an anchor to land on, so a comment on one would be dropped in silence.
+    // canonicalize turns the break back into the space it stands for.
+    if (cells[i]) renderInline(cells[i], cell);
+    else cell.appendChild(document.createElement("br"));
+    tr.appendChild(cell);
+  }
+  return tr;
 }
 
 function renderBlock(block, container) {
@@ -359,6 +496,16 @@ function renderBlock(block, container) {
       renderInline(item.text, li);
       top().list.appendChild(li);
     }
+  } else if (kind === "table") {
+    const { rows, aligns } = parseTable(block);
+    const table = document.createElement("table");
+    const head = document.createElement("thead");
+    head.appendChild(renderRow(rows[0], aligns, "th"));
+    table.appendChild(head);
+    const body = document.createElement("tbody");
+    for (const r of rows.slice(1)) body.appendChild(renderRow(r, aligns, "td"));
+    table.appendChild(body);
+    container.appendChild(table);
   } else {
     const p = document.createElement("p");
     renderInline(lines.join(" "), p);
@@ -379,8 +526,15 @@ function renderMarkdown(md, container) {
    subtrees are left alone — the serializer emits their text verbatim, so
    rewriting inside them would rewrite the markdown. */
 const BLOCK_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "DIV",
-  "UL", "OL", "PRE"]);
+  "UL", "OL", "PRE", "TABLE"]);
 const VERBATIM_TAGS = new Set(["PRE", "CODE"]);
+// What docTextAndMap breaks anchor text on, which is not the same question:
+// without a break after every cell, neighbouring cells run together into words
+// that appear nowhere on the page and evidence()'s whole-word rule has no
+// whitespace left to find. The cell tags stay out of BLOCK_TAGS itself, which
+// also decides what serializeContainer treats as a block of its own.
+const TEXT_BREAK_TAGS = new Set([...BLOCK_TAGS,
+  "THEAD", "TBODY", "TR", "TH", "TD"]);
 
 function hasBlockChild(el) {
   return Array.from(el.children).some((c) => BLOCK_TAGS.has(c.tagName));
@@ -460,6 +614,85 @@ function serializeList(listEl, depth) {
   return lines;
 }
 
+function tableRows(tableEl) {
+  // Gathered at any depth, so a thead, a tbody, or whatever wrapper the browser
+  // decided to add cannot hide a row from the serializer or the row controls.
+  const rows = [];
+  (function walk(el) {
+    for (const child of el.children) {
+      if (child.tagName === "TR") rows.push(child);
+      else walk(child);
+    }
+  })(tableEl);
+  return rows;
+}
+
+function tableCells(tr) {
+  return Array.from(tr.children)
+    .filter((c) => c.tagName === "TH" || c.tagName === "TD");
+}
+
+/* The structural edits behind the turn page's row and column controls. They sit
+   here rather than with the controls so the test rig can reach them: the rig
+   loads everything above the app banner, and a table operation that gets a
+   column wrong is exactly the kind of thing a browser-only check misses. */
+function tableBody(tableEl) {
+  for (const child of tableEl.children) if (child.tagName === "TBODY") return child;
+  return tableEl;
+}
+
+function newCell(tag, align) {
+  const cell = document.createElement(tag);
+  if (align) cell.dataset.align = align;
+  cell.appendChild(document.createElement("br"));
+  return cell;
+}
+
+function insertRow(tableEl, at) {
+  // Always a body row: the header is what the delimiter row is rebuilt from,
+  // so nothing may be inserted above it.
+  const tr = document.createElement("tr");
+  for (const h of tableCells(tableRows(tableEl)[0])) {
+    tr.appendChild(newCell("td", h.dataset.align));
+  }
+  const body = tableBody(tableEl);
+  const ref = tableRows(tableEl)[at];
+  if (ref && ref.parentNode === body) body.insertBefore(tr, ref);
+  else body.appendChild(tr);
+}
+
+function insertColumn(tableEl, at) {
+  for (const tr of tableRows(tableEl)) {
+    const tag = tableCells(tr)[0] && tableCells(tr)[0].tagName === "TH" ? "th" : "td";
+    // A row that does not reach the insertion point is padded out to it first.
+    // Without that its new cell lands wherever its own length puts it, which is
+    // a different column from the one the reviewer inserted beside — and what
+    // they type there is then serialized under the wrong heading.
+    while (tableCells(tr).length < at) tr.appendChild(newCell(tag, ""));
+    const cells = tableCells(tr);
+    const cell = newCell(tag, "");        // a new column carries no alignment
+    if (at < cells.length) tr.insertBefore(cell, cells[at]);
+    else tr.appendChild(cell);
+  }
+}
+
+function serializeTable(tableEl) {
+  const rows = tableRows(tableEl);
+  if (!rows.length || !tableCells(rows[0]).length) return "";
+  // A block child inside a cell is where the reviewer pressed Enter — some
+  // engines leave a div per line rather than a break — so it is worth the space
+  // that keeps its two lines from fusing into one word.
+  const cellMd = (c) => cellText(Array.from(c.childNodes).map((n) =>
+    (n.nodeType === 1 && BLOCK_TAGS.has(n.tagName) ? " " : "") +
+    serializeInline(n)).join(""));
+  const lines = rows.map((tr) => tableRowMd(tableCells(tr).map(cellMd)));
+  // The delimiter row is structure rather than content, so it never exists as
+  // a node: it is rebuilt from the header's alignments and width.
+  lines.splice(1, 0, tableRowMd(tableCells(rows[0]).map((c) =>
+    ALIGN_MARK[c.dataset.align || ""])));
+  return lines.join("\n");
+}
+
 function serializeContainer(root, blocks) {
   let run = [];
   const flushRun = () => {
@@ -481,6 +714,9 @@ function serializeContainer(root, blocks) {
       } else if (tag === "PRE") {
         const lang = node.dataset.lang || "";
         blocks.push("```" + lang + "\n" + node.textContent.replace(/\n$/, "") + "\n```");
+      } else if (tag === "TABLE") {
+        const t = serializeTable(node);
+        if (t) blocks.push(t);
       } else {
         const t = Array.from(node.childNodes).map(serializeInline).join("").trim();
         if (t) blocks.push(t);
@@ -559,7 +795,7 @@ function docTextAndMap(root) {
       if (child.nodeType === 3) { map.push({ node: child, start: text.length }); text += child.nodeValue; }
       else if (child.nodeType === 1) {
         walk(child);
-        if (BLOCK_TAGS.has(child.tagName)) text += "\n";
+        if (TEXT_BREAK_TAGS.has(child.tagName)) text += "\n";
       }
     }
   })(root);
@@ -738,10 +974,12 @@ if (fnv1a(DATA.baseDoc) !== DATA.checksum) {
     "the self-check failed so it can rebuild the turn.");
 } else if (normalize(serialize(clean)) !== normalize(DATA.baseDoc)) {
   selfCheckOK = false;
+  // Rebuilding alone re-embeds the same document and lands on the same dead
+  // page, so the advice has to point at the markdown rather than the turn.
   notice("danger", "<strong>Self-check failed:</strong> this page cannot faithfully " +
     "capture edits to this document (round-trip mismatch). Don't review here — " +
-    "tell the agent the self-check failed so it can rebuild the turn. " +
-    "This turn will not be used.");
+    "tell the agent the self-check failed, so it can repair the document itself " +
+    "before rebuilding. This turn will not be used.");
 }
 if (!selfCheckOK) {
   clean.setAttribute("contenteditable", "false");
@@ -817,9 +1055,103 @@ function setView(which) {
   btnClean.setAttribute("aria-pressed", String(which === "clean"));
   btnChanges.setAttribute("aria-pressed", String(which === "changes"));
   hideCommentBtn();
+  hideTableTools();
 }
 btnClean.addEventListener("click", () => setView("clean"));
 btnChanges.addEventListener("click", () => setView("changes"));
+
+/* ---------------------------------------------------------- table editing
+   Rows and columns are structure, and a browser left to itself in a
+   contenteditable table invents shapes markdown has no spelling for. These six
+   do the surgery instead, on tables the renderer built, so what comes back is
+   always a table. Cell text stays ordinary editable content, and no key is
+   intercepted — every interception is another way to reach a round-trip the
+   serializer cannot express. */
+const tableTools = document.getElementById("table-tools");
+let toolCell = null;             // the cell the tools currently act on
+
+function hideTableTools() {
+  if (tableTools.style.display === "flex") tableTools.style.display = "none";
+  toolCell = null;
+}
+
+function caretInto(cell) {
+  if (!cell) return;
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+document.addEventListener("selectionchange", () => {
+  // Cheap checks before the rect: this fires on every caret move while typing.
+  const sel = window.getSelection();
+  const node = sel && sel.anchorNode;
+  const el = node && (node.nodeType === 3 ? node.parentNode : node);
+  const cell = el && el.closest ? el.closest("th, td") : null;
+  if (!cell || !selfCheckOK || clean.hidden || !clean.contains(cell) ||
+      !clean.offsetParent) return hideTableTools();
+  toolCell = cell;
+  const table = cell.closest("table");
+  const rows = tableRows(table);
+  // The header row defines the table's shape, and a table with no columns left
+  // is not one — so those two deletions are refused rather than performed.
+  tableTools.querySelector('[data-table-op="row-delete"]').disabled =
+    rows.indexOf(cell.parentNode) === 0;
+  tableTools.querySelector('[data-table-op="col-delete"]').disabled =
+    tableCells(rows[0]).length < 2;
+  const rect = table.getBoundingClientRect();
+  tableTools.style.display = "flex";
+  tableTools.style.top = (window.scrollY + rect.top - 30) + "px";
+  tableTools.style.left = (window.scrollX + rect.left) + "px";
+});
+
+tableTools.addEventListener("mousedown", (e) => {
+  // mousedown rather than click, preventing default, so pressing a button never
+  // takes the caret out of the cell the operation is about to read.
+  const btn = e.target.closest ? e.target.closest("[data-table-op]") : null;
+  if (!btn || btn.disabled) return;
+  e.preventDefault();
+  const cell = toolCell;
+  const table = cell && cell.closest("table");
+  if (!table || !clean.contains(table)) return;
+  const at = tableRows(table).indexOf(cell.parentNode);
+  const col = tableCells(cell.parentNode).indexOf(cell);
+  let row = at, column = col;
+  switch (btn.dataset.tableOp) {
+    case "row-above": row = Math.max(1, at); insertRow(table, row); break;
+    case "row-below": row = at + 1; insertRow(table, row); break;
+    case "col-left": insertColumn(table, col); break;
+    case "col-right": column = col + 1; insertColumn(table, column); break;
+    // The two refusals are re-checked here rather than trusted to the disabled
+    // buttons: those are set on selectionchange, so a second press landing
+    // before the next one would otherwise take the header row or the last
+    // column with it.
+    case "row-delete":
+      if (at < 1) return;
+      cell.parentNode.remove();
+      row = Math.min(at, tableRows(table).length - 1);
+      break;
+    case "col-delete":
+      if (tableCells(tableRows(table)[0]).length < 2) return;
+      for (const tr of tableRows(table)) {
+        const c = tableCells(tr)[col];
+        if (c) c.remove();
+      }
+      column = Math.min(col, tableCells(tableRows(table)[0]).length - 1);
+      break;
+    default: return;
+  }
+  // Highlights live inside cells, so they are re-placed before the caret is:
+  // renderThreads rewrites the mark elements the caret would sit among. The
+  // autosave hangs off the input event, which a programmatic edit never fires.
+  renderThreads();
+  const rows = tableRows(table);
+  caretInto(rows[row] && tableCells(rows[row])[column]);
+  scheduleSave();
+});
 
 /* -------------------------------------------------------------- comments */
 const commentBtn = document.getElementById("comment-btn");
@@ -1117,8 +1449,32 @@ refreshSendChannels();
   } catch (e) { /* cannot probe — the click fallbacks still catch failure */ }
 })();
 
+/* The load-time self-check only ever sees the base document, and the checksum
+   on the blob below certifies transport rather than fidelity — so nothing has
+   been watching what the reviewer's own edits serialize to. This does: markdown
+   the page cannot render back to itself would be committed as the next turn's
+   base, and the failure would surface a turn later, on a page that rebuilding
+   cannot fix because the corrupt base is already in the file. */
+function unrenderable(doc) {
+  const box = document.createElement("div");
+  renderMarkdown(doc, box);
+  return serialize(box) !== doc;
+}
+
+let sendBlocked = null;         // the standing "not sent" notice, if any
+
 document.getElementById("send-btn").addEventListener("click", () => {
   const doc = serialize(clean);
+  if (sendBlocked) { sendBlocked.remove(); sendBlocked = null; }
+  if (unrenderable(doc)) {
+    statusEl.textContent = "";
+    sendBlocked = notice("danger", "<strong>Not sent:</strong> an edit has left the " +
+      "document in a shape this page cannot read back — usually an unclosed code " +
+      "fence, or a stray pipe or line break inside a table cell. Undo the last edit " +
+      "and try again.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
   blobJson = JSON.stringify({ turn: DATA.turn, checksum: fnv1a(doc),
     baseChecksum: DATA.checksum, docName: DATA.docName, doc,
     comments: outgoing, resolved: resolvedLocal });

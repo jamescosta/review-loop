@@ -120,5 +120,24 @@ check("S13 a non-string context is no context, not a crash",
   "the plan here.\n\nand the plan there.\n",
   { text: "the plan", occurrence: 0, before: 5, after: 7 }, null);
 
+// Tables. Anchor text has to break at every cell: fuse two and the document
+// grows words that were never on the page, and every context score around them
+// is decided by whitespace that is not there.
+function checkAbsent(name, md, needle) {
+  const ok = !ctxFor(md).text.includes(needle);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}  -> ${ok ? "absent" : "FUSED " +
+    JSON.stringify(needle)}`);
+  if (!ok) failures += 1;
+}
+
+const tableOld = "Intro paragraph mentions the plan too.\n\n" +
+  "| Owner | Task |\n| --- | --- |\n| Ada | the plan |\n| Bo | the build |\n";
+const inCell = capture(tableOld, "the plan", 1);
+check("S14 a comment anchored in a table cell survives a prose rewrite",
+  "Rollout notes still mention the plan.\n\n" +
+  "| Owner | Task |\n| --- | --- |\n| Ada | the plan |\n| Bo | the rebuild |\n",
+  inCell, "the plan\n\nBo");
+checkAbsent("S15 neighbouring cells never fuse into one word", tableOld, "OwnerTask");
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
