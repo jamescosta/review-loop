@@ -451,6 +451,15 @@ def test_build_artifact_embeds_escaped_data(project):
     assert data["turn"] == 1 and data["checksum"] == loop.fnv1a(data["baseDoc"])
 
 
+def test_build_artifact_declares_charset_early(project):
+    r = run(["build-artifact", project])
+    assert r.returncode == 0, r.stderr
+    # Raw hosts (Cowork's gallery, file://) send no encoding header, and the
+    # declaration only counts inside the page's first 1024 bytes.
+    head = (project / ".review" / "artifact.html").read_bytes()[:1024]
+    assert b'<meta charset="utf-8">' in head
+
+
 def test_carried_thread_anchors_keep_their_context(project, tmp_path):
     # The page places a thread by matching its recorded context against the
     # current document, so a carried thread has to reach the next artifact
