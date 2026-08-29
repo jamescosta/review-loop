@@ -863,38 +863,37 @@ function pointOffset(container, offset, map) {
   return entry ? entry.start + last.nodeValue.length : null;
 }
 
-function runBack(recorded, actual) {
-  let n = 0;
-  while (n < recorded.length && n < actual.length &&
-    recorded[recorded.length - 1 - n] === actual[actual.length - 1 - n]) n += 1;
-  return n;
-}
-
 function runForward(recorded, actual) {
   let n = 0;
   while (n < recorded.length && n < actual.length && recorded[n] === actual[n]) n += 1;
   return n;
 }
 
-/* The longest run either of the above finds once the characters right at the
-   boundary are allowed to be the edit: an edit costs only the characters it
-   touches, and those are not always the ones touching the anchor. Trying every
-   width of a possible boundary edit and keeping the best run beyond it is what
-   stops one edited character from erasing context that survived further out.
-   `run` is runBack or runForward, matching which side is being scored; each
-   trims the same number of characters from both strings' shared end before
-   measuring, so a plain substitution at the boundary realigns and the rest of
-   the context counts again. */
-function bestRun(run, recorded, actual, forward) {
-  let bestLen = 0, bestStart = forward ? 0 : recorded.length;
-  for (let skip = 0; skip < recorded.length; skip += 1) {
-    const r = forward ? recorded.slice(skip) : recorded.slice(0, recorded.length - skip);
-    const a = forward ? actual.slice(skip) : actual.slice(0, actual.length - skip);
-    const n = run(r, a);
-    if (n > bestLen) { bestLen = n; bestStart = forward ? skip : recorded.length - skip; }
+function reverseStr(s) {
+  return s.split("").reverse().join("");
+}
+
+/* The longest run of `recorded` still surviving in `actual` once the
+   characters right at the boundary are allowed to be the edit: an edit costs
+   only the characters it touches, and those are not always the ones touching
+   the anchor. `before` reads backward from the anchor, so reversing both
+   strings turns it into the same forward scan as `after` — one loop, trying
+   every width a boundary edit could have by trimming that many characters off
+   the shared boundary before measuring, and keeping the best surviving run.
+   Skip 0 is the untouched common case, and a full-length match there ends the
+   search immediately: no larger skip, working from a shorter remainder, can
+   ever beat a run that already used the whole string. */
+function bestRun(recorded, actual, forward) {
+  const r = forward ? recorded : reverseStr(recorded);
+  const a = forward ? actual : reverseStr(actual);
+  let bestLen = 0, bestStart = 0;
+  for (let skip = 0; skip < r.length; skip += 1) {
+    const n = runForward(r.slice(skip), a.slice(skip));
+    if (n > bestLen) { bestLen = n; bestStart = skip; }
+    if (n === r.length - skip) break;
   }
-  return forward ? recorded.slice(bestStart, bestStart + bestLen)
-    : recorded.slice(bestStart - bestLen, bestStart);
+  const kept = r.slice(bestStart, bestStart + bestLen);
+  return forward ? kept : reverseStr(kept);
 }
 
 /* What one surviving stretch of recorded context is worth. A partial run has
@@ -961,9 +960,9 @@ function locateAnchor(anchor, root, ctx) {
   let best = 0; const winners = [];
   for (let k = 0; k < hits.length; k += 1) {
     const stop = hits[k] + anchor.text.length;
-    const keptBefore = bestRun(runBack, before,
+    const keptBefore = bestRun(before,
       text.slice(Math.max(0, hits[k] - before.length), hits[k]), false);
-    const keptAfter = bestRun(runForward, after,
+    const keptAfter = bestRun(after,
       text.slice(stop, stop + after.length), true);
     const score = evidence(keptBefore, before.length) + evidence(keptAfter, after.length);
     if (score > best) { best = score; winners.length = 0; }
