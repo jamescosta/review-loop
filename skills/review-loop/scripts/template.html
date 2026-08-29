@@ -876,6 +876,27 @@ function runForward(recorded, actual) {
   return n;
 }
 
+/* The longest run either of the above finds once the characters right at the
+   boundary are allowed to be the edit: an edit costs only the characters it
+   touches, and those are not always the ones touching the anchor. Trying every
+   width of a possible boundary edit and keeping the best run beyond it is what
+   stops one edited character from erasing context that survived further out.
+   `run` is runBack or runForward, matching which side is being scored; each
+   trims the same number of characters from both strings' shared end before
+   measuring, so a plain substitution at the boundary realigns and the rest of
+   the context counts again. */
+function bestRun(run, recorded, actual, forward) {
+  let bestLen = 0, bestStart = forward ? 0 : recorded.length;
+  for (let skip = 0; skip < recorded.length; skip += 1) {
+    const r = forward ? recorded.slice(skip) : recorded.slice(0, recorded.length - skip);
+    const a = forward ? actual.slice(skip) : actual.slice(0, actual.length - skip);
+    const n = run(r, a);
+    if (n > bestLen) { bestLen = n; bestStart = forward ? skip : recorded.length - skip; }
+  }
+  return forward ? recorded.slice(bestStart, bestStart + bestLen)
+    : recorded.slice(bestStart - bestLen, bestStart);
+}
+
 /* What one surviving stretch of recorded context is worth. A partial run has
    to carry a whole word to count for anything: unrelated prose agrees on the
    space beside the anchor and rarely more, so counting those characters lets a
@@ -940,10 +961,10 @@ function locateAnchor(anchor, root, ctx) {
   let best = 0; const winners = [];
   for (let k = 0; k < hits.length; k += 1) {
     const stop = hits[k] + anchor.text.length;
-    const keptBefore = before.slice(before.length -
-      runBack(before, text.slice(Math.max(0, hits[k] - before.length), hits[k])));
-    const keptAfter = after.slice(0,
-      runForward(after, text.slice(stop, stop + after.length)));
+    const keptBefore = bestRun(runBack, before,
+      text.slice(Math.max(0, hits[k] - before.length), hits[k]), false);
+    const keptAfter = bestRun(runForward, after,
+      text.slice(stop, stop + after.length), true);
     const score = evidence(keptBefore, before.length) + evidence(keptAfter, after.length);
     if (score > best) { best = score; winners.length = 0; }
     if (score === best) winners.push(k);

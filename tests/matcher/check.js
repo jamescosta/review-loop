@@ -139,5 +139,32 @@ check("S14 a comment anchored in a table cell survives a prose rewrite",
   inCell, "the plan\n\nBo");
 checkAbsent("S15 neighbouring cells never fuse into one word", tableOld, "OwnerTask");
 
+// review-loop#5 round 5, deferred P1: two occurrences share identical
+// after-context, so only `before` can tell them apart. The correct occurrence
+// gets a one-character substitution touching the anchor itself (space ->
+// underscore); the decoy is untouched but happens to share a real phrase with
+// the recorded `before`. runBack stops at the very first character it checks,
+// so the edited occurrence scored zero while the decoy's merely-partial match
+// outscored it and stole the thread. Both anchor texts are identical after
+// the edit, so the assertion has to compare positions, not substrings.
+const sharedTail = "then finally signed off on";
+const decoyBefore = `Committee X noted this yesterday and ${sharedTail}`;
+const correctBefore = `Our team debated for hours, ${sharedTail}`;
+const stealAfter = " is due Friday.\n";
+const stealOld = `${decoyBefore} the plan${stealAfter}\n${correctBefore} the plan${stealAfter}`;
+const stealNew = `${decoyBefore} the plan${stealAfter}\n${correctBefore}_the plan${stealAfter}`;
+const stealAnchor = capture(stealOld, "the plan", 1);
+
+{
+  const name = "S16 boundary substitution does not let an untouched decoy steal the thread";
+  const newText = ctxFor(stealNew).text;
+  const wantIdx = newText.lastIndexOf("the plan"); // the edited (correct) occurrence
+  const got = locate(stealNew, stealAnchor);
+  const ok = got !== null && !got.threw && got.idx === wantIdx;
+  const shown = !got ? "orphan" : got.threw ? "THREW " + got.threw : `idx ${got.idx} (want ${wantIdx})`;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}  -> ${shown}`);
+  if (!ok) failures += 1;
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
