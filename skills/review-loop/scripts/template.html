@@ -874,12 +874,17 @@ function runForward(recorded, actual) {
    space beside the anchor and rarely more, so counting those characters lets a
    coincidence outrank a side that survived intact. A side matching in full
    always counts however short it is — short only happens at the document's
-   edge, where there was never more context to record. */
+   edge, where there was never more context to record. Measured in Unicode
+   code points, not UTF-16 units: `recordedLength` is a code-point count (every
+   caller passes one), and scoring `kept` in the other unit would hand a run
+   extra credit for containing a non-BMP character, worth two units but one
+   character. */
 const WHOLE_WORD = /\s\S+\s/;
 
 function evidence(kept, recordedLength) {
-  if (kept.length === recordedLength) return kept.length;
-  return WHOLE_WORD.test(kept) ? kept.length : 0;
+  const keptLength = [...kept].length;
+  if (keptLength === recordedLength) return keptLength;
+  return WHOLE_WORD.test(kept) ? keptLength : 0;
 }
 
 /* The best-evidence run of `recorded` still surviving in `actual` once the
@@ -901,12 +906,13 @@ function bestRun(recorded, actual, forward) {
   const rPoints = [...recorded], aPoints = [...actual];
   const r = forward ? rPoints : rPoints.reverse();
   const a = forward ? aPoints : aPoints.reverse();
+  const recordedLength = r.length; // code points, not recorded.length (UTF-16 units)
   let bestKept = "", bestScore = 0;
   for (let skip = 0; skip < r.length; skip += 1) {
     const n = runForward(r.slice(skip), a.slice(skip));
     const points = r.slice(skip, skip + n);
     const kept = (forward ? points : points.reverse()).join("");
-    const score = evidence(kept, recorded.length);
+    const score = evidence(kept, recordedLength);
     if (score > bestScore) { bestScore = score; bestKept = kept; }
     if (n === r.length - skip) break;
   }
@@ -955,6 +961,10 @@ function locateAnchor(anchor, root, ctx) {
   // could have produced.
   const before = (typeof anchor.before === "string" ? anchor.before : "").slice(-30);
   const after = (typeof anchor.after === "string" ? anchor.after : "").slice(0, 30);
+  // Code-point counts, not before.length/after.length: those are UTF-16 unit
+  // counts, and evidence() scores in code points to match.
+  const beforeLen = [...before].length;
+  const afterLen = [...after].length;
   const hits = [];
   for (let i = text.indexOf(anchor.text); i >= 0;
        i = text.indexOf(anchor.text, i + 1)) hits.push(i);
@@ -972,11 +982,11 @@ function locateAnchor(anchor, root, ctx) {
       text.slice(Math.max(0, hits[k] - before.length), hits[k]), false);
     const keptAfter = bestRun(after,
       text.slice(stop, stop + after.length), true);
-    const score = evidence(keptBefore, before.length) + evidence(keptAfter, after.length);
+    const score = evidence(keptBefore, beforeLen) + evidence(keptAfter, afterLen);
     if (score > best) { best = score; winners.length = 0; }
     if (score === best) winners.push(k);
   }
-  const interchangeable = best === before.length + after.length &&
+  const interchangeable = best === beforeLen + afterLen &&
     winners.includes(anchor.occurrence);
   const pick = best === 0 ? -1
     : winners.length === 1 ? winners[0]

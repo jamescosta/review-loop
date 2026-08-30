@@ -15,8 +15,9 @@ DEFAULT_SRC = HERE.parent.parent / "skills" / "review-loop" / "scripts" / "templ
 SRC = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SRC
 
 FLOOR = """function evidence(kept, recordedLength) {
-  if (kept.length === recordedLength) return kept.length;
-  return WHOLE_WORD.test(kept) ? kept.length : 0;
+  const keptLength = [...kept].length;
+  if (keptLength === recordedLength) return keptLength;
+  return WHOLE_WORD.test(kept) ? keptLength : 0;
 }"""
 PICK = """  const pick = best === 0 ? -1
     : winners.length === 1 ? winners[0]
@@ -30,7 +31,7 @@ MUTANTS = [
      '  const before = (anchor.before || "").slice(-30);'),
     ("lone-occurrence shortcut removed", LONE, "  if (hits.length === 1) { /* fall through */ }"),
     ("evidence floor removed (a single character counts)", FLOOR,
-     "function evidence(kept, recordedLength) { return kept.length; }"),
+     "function evidence(kept, recordedLength) { return [...kept].length; }"),
     ("no-evidence guard removed (stale index still wins)", PICK,
      """  const pick = winners.length === 1 ? winners[0]
     : winners.includes(anchor.occurrence) ? anchor.occurrence : -1;"""),

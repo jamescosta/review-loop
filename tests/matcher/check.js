@@ -215,5 +215,21 @@ function checkIdx(name, md, anchor, wantIdx) {
   checkIdx("S18 a coincidental shared surrogate half is not evidence", md, anchor, null);
 }
 
+// Codex round on this PR (ec3a8d3): the scan advanced by code point, but
+// evidence still scored `kept` with UTF-16 `.length`, so a kept run holding a
+// non-BMP character was worth one point more than a same-length (in code
+// points) run without one. A decoy whose kept run happens to include an emoji
+// then outranks the correct occurrence's genuinely-matching, emoji-free run of
+// the same code-point length outright, instead of the two tying and orphaning.
+{
+  const before = "shared unedited lead-in text right up to";
+  const recordedAfter = " \u{1F600}x  ab ";  // " 😀x " (4 code points) + " ab " (4 code points)
+  const decoyAfter = " \u{1F600}x XXXX";     // untouched: matches " 😀x ", then diverges
+  const correctAfterNew = "ZZZZ ab ";        // edited: mismatches " 😀x ", then matches " ab " exactly
+  const md = `${before} the plan${decoyAfter}\n${before} the plan${correctAfterNew}`;
+  const anchor = { text: "the plan", occurrence: 1, before: before.slice(-30), after: recordedAfter };
+  checkIdx("S19 an emoji in a kept run is not worth an extra point", md, anchor, null);
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
