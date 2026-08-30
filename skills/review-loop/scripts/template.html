@@ -869,33 +869,6 @@ function runForward(recorded, actual) {
   return n;
 }
 
-function reverseStr(s) {
-  return s.split("").reverse().join("");
-}
-
-/* The longest run of `recorded` still surviving in `actual` once the
-   characters right at the boundary are allowed to be the edit: an edit costs
-   only the characters it touches, and those are not always the ones touching
-   the anchor. `before` reads backward from the anchor, so reversing both
-   strings turns it into the same forward scan as `after` — one loop, trying
-   every width a boundary edit could have by trimming that many characters off
-   the shared boundary before measuring, and keeping the best surviving run.
-   Skip 0 is the untouched common case, and a full-length match there ends the
-   search immediately: no larger skip, working from a shorter remainder, can
-   ever beat a run that already used the whole string. */
-function bestRun(recorded, actual, forward) {
-  const r = forward ? recorded : reverseStr(recorded);
-  const a = forward ? actual : reverseStr(actual);
-  let bestLen = 0, bestStart = 0;
-  for (let skip = 0; skip < r.length; skip += 1) {
-    const n = runForward(r.slice(skip), a.slice(skip));
-    if (n > bestLen) { bestLen = n; bestStart = skip; }
-    if (n === r.length - skip) break;
-  }
-  const kept = r.slice(bestStart, bestStart + bestLen);
-  return forward ? kept : reverseStr(kept);
-}
-
 /* What one surviving stretch of recorded context is worth. A partial run has
    to carry a whole word to count for anything: unrelated prose agrees on the
    space beside the anchor and rarely more, so counting those characters lets a
@@ -907,6 +880,37 @@ const WHOLE_WORD = /\s\S+\s/;
 function evidence(kept, recordedLength) {
   if (kept.length === recordedLength) return kept.length;
   return WHOLE_WORD.test(kept) ? kept.length : 0;
+}
+
+/* The best-evidence run of `recorded` still surviving in `actual` once the
+   characters right at the boundary are allowed to be the edit: an edit costs
+   only the characters it touches, and those are not always the ones touching
+   the anchor. Every width a boundary edit could have is tried, trimming that
+   many characters off the shared boundary before measuring — and the run kept
+   is the one `evidence` scores highest, not merely the longest raw match: a
+   longer run stranded inside one unbroken token can lose to a shorter run
+   that carries a whole word, so raw length alone would throw the second one
+   away. `before` reads backward from the anchor, so reversing both turns it
+   into the same forward scan as `after`. The scan works in Unicode code
+   points, not UTF-16 units, so a boundary edit can never split a surrogate
+   pair and hand a lone half credit for a character it isn't. Skip 0 is the
+   untouched common case, and a full-length match there ends the search
+   immediately: no larger skip, working from a shorter remainder, can ever
+   beat a run that already used the whole string. */
+function bestRun(recorded, actual, forward) {
+  const rPoints = [...recorded], aPoints = [...actual];
+  const r = forward ? rPoints : rPoints.reverse();
+  const a = forward ? aPoints : aPoints.reverse();
+  let bestKept = "", bestScore = 0;
+  for (let skip = 0; skip < r.length; skip += 1) {
+    const n = runForward(r.slice(skip), a.slice(skip));
+    const points = r.slice(skip, skip + n);
+    const kept = (forward ? points : points.reverse()).join("");
+    const score = evidence(kept, recorded.length);
+    if (score > bestScore) { bestScore = score; bestKept = kept; }
+    if (n === r.length - skip) break;
+  }
+  return bestKept;
 }
 
 /* An anchor's occurrence index is a position in a document that keeps
@@ -944,9 +948,13 @@ function locateAnchor(anchor, root, ctx) {
   // Anything that is not a string is no context at all: apply checks that the
   // anchor's keys exist, not what they hold, so a hand-made blob can persist a
   // number here — and a thread that threw while being placed would take the
-  // whole page down with it on this turn and every turn after.
-  const before = typeof anchor.before === "string" ? anchor.before : "";
-  const after = typeof anchor.after === "string" ? anchor.after : "";
+  // whole page down with it on this turn and every turn after. Capped to the
+  // same 30 characters the page itself ever captures (below): apply enforces
+  // no such limit, so a hand-made blob can claim far more, and bestRun's scan
+  // cost grows with what it is handed rather than with what a real selection
+  // could have produced.
+  const before = (typeof anchor.before === "string" ? anchor.before : "").slice(-30);
+  const after = (typeof anchor.after === "string" ? anchor.after : "").slice(0, 30);
   const hits = [];
   for (let i = text.indexOf(anchor.text); i >= 0;
        i = text.indexOf(anchor.text, i + 1)) hits.push(i);

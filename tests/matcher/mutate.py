@@ -22,12 +22,12 @@ PICK = """  const pick = best === 0 ? -1
     : winners.length === 1 ? winners[0]
     : interchangeable ? anchor.occurrence : -1;"""
 NOHIT = "  if (!hits.length) return null;"
-COERCE = '  const before = typeof anchor.before === "string" ? anchor.before : "";'
+COERCE = '  const before = (typeof anchor.before === "string" ? anchor.before : "").slice(-30);'
 LONE = "  if (hits.length === 1) return { idx: hits[0], map: ctx.map };"
 
 MUTANTS = [
     ("non-string context coercion removed", COERCE,
-     '  const before = anchor.before || "";'),
+     '  const before = (anchor.before || "").slice(-30);'),
     ("lone-occurrence shortcut removed", LONE, "  if (hits.length === 1) { /* fall through */ }"),
     ("evidence floor removed (a single character counts)", FLOOR,
      "function evidence(kept, recordedLength) { return kept.length; }"),
