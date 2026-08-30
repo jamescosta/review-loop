@@ -139,5 +139,97 @@ check("S14 a comment anchored in a table cell survives a prose rewrite",
   inCell, "the plan\n\nBo");
 checkAbsent("S15 neighbouring cells never fuse into one word", tableOld, "OwnerTask");
 
+// review-loop#5 round 5, deferred P1: two occurrences share identical
+// after-context, so only `before` can tell them apart. The correct occurrence
+// gets a one-character substitution touching the anchor itself (space ->
+// underscore); the decoy is untouched but happens to share a real phrase with
+// the recorded `before`. runBack stops at the very first character it checks,
+// so the edited occurrence scored zero while the decoy's merely-partial match
+// outscored it and stole the thread. Both anchor texts are identical after
+// the edit, so the assertion has to compare positions, not substrings.
+const sharedTail = "then finally signed off on";
+const decoyBefore = `Committee X noted this yesterday and ${sharedTail}`;
+const correctBefore = `Our team debated for hours, ${sharedTail}`;
+const stealAfter = " is due Friday.\n";
+const stealOld = `${decoyBefore} the plan${stealAfter}\n${correctBefore} the plan${stealAfter}`;
+const stealNew = `${decoyBefore} the plan${stealAfter}\n${correctBefore}_the plan${stealAfter}`;
+const stealAnchor = capture(stealOld, "the plan", 1);
+
+{
+  const name = "S16 boundary substitution does not let an untouched decoy steal the thread";
+  const newText = ctxFor(stealNew).text;
+  const wantIdx = newText.lastIndexOf("the plan"); // the edited (correct) occurrence
+  const got = locate(stealNew, stealAnchor);
+  const ok = got !== null && !got.threw && got.idx === wantIdx;
+  const shown = !got ? "orphan" : got.threw ? "THREW " + got.threw : `idx ${got.idx} (want ${wantIdx})`;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}  -> ${shown}`);
+  if (!ok) failures += 1;
+}
+
+function checkIdx(name, md, anchor, wantIdx) {
+  const got = locate(md, anchor);
+  const ok = wantIdx === null ? got === null
+    : got !== null && !got.threw && got.idx === wantIdx;
+  const shown = !got ? "orphan" : got.threw ? "THREW " + got.threw : `idx ${got.idx}`;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}  -> ${shown} (want ${wantIdx === null ? "orphan" : "idx " + wantIdx})`);
+  if (!ok) failures += 1;
+}
+
+// Codex round on this PR: bestRun picked the raw-longest surviving run, not
+// the one `evidence` would score highest. A run stranded inside one unbroken
+// token can be longer than a run that carries a whole word, so the edited
+// occurrence kept its long-but-worthless run (evidence 0) while a shorter,
+// real match sat unused at a different skip depth — and a decoy with even a
+// small whole-word match then won. `before` is identical for both occurrences
+// so it cannot decide this; only `after` differs.
+{
+  const sharedBefore = "Our team debated for hours, then finally signed off on";
+  const correctAfterOld = "x".repeat(20) + " then ok";       // recorded, captured pre-edit
+  const correctAfterNew = "x".repeat(19) + "Y" + " then ok"; // one char edited inside the run
+  const decoyAfter = "y".repeat(20) + " then no ";           // untouched, shares only "then" with recorded
+  const md = `${sharedBefore} the plan${decoyAfter}\n${sharedBefore} the plan${correctAfterNew}`;
+  const text = ctxFor(md).text;
+  const hits = [];
+  for (let i = text.indexOf("the plan"); i >= 0; i = text.indexOf("the plan", i + 1)) hits.push(i);
+  const anchor = { text: "the plan", occurrence: 1, before: sharedBefore.slice(-30), after: correctAfterOld };
+  checkIdx("S17 the highest-evidence run wins, not the longest raw run", md, anchor, hits[1]);
+}
+
+// Codex round on this PR: reversing `before` by splitting the string into
+// UTF-16 units, not Unicode code points, could tear a non-BMP character (an
+// emoji) into its two surrogate halves. Two different emoji that happen to
+// share one half then read as a partial match on that lone half — evidence
+// neither emoji actually carries. Two occurrences whose touching character is
+// an edited emoji, sharing a surrogate half with the recorded one only by
+// coincidence, must not let that half decide the thread: the honest read is
+// that the edit leaves both context sides indistinguishable, not that one
+// wins by half a character.
+{
+  const prefix = "report is ready ";
+  const recordedBefore = prefix + "\u{1F600}"; // 😀
+  const decoyBefore = prefix + "\u{1F603}";    // 😃 — shares 😀's high surrogate
+  const correctBeforeNew = prefix + "\u{1FAE0}"; // 🫠 — shares neither half
+  const after = " is due Friday.\n";
+  const md = `${decoyBefore}the plan${after}\n${correctBeforeNew}the plan${after}`;
+  const anchor = { text: "the plan", occurrence: 1, before: recordedBefore.slice(-30), after };
+  checkIdx("S18 a coincidental shared surrogate half is not evidence", md, anchor, null);
+}
+
+// Codex round on this PR (ec3a8d3): the scan advanced by code point, but
+// evidence still scored `kept` with UTF-16 `.length`, so a kept run holding a
+// non-BMP character was worth one point more than a same-length (in code
+// points) run without one. A decoy whose kept run happens to include an emoji
+// then outranks the correct occurrence's genuinely-matching, emoji-free run of
+// the same code-point length outright, instead of the two tying and orphaning.
+{
+  const before = "shared unedited lead-in text right up to";
+  const recordedAfter = " \u{1F600}x  ab ";  // " 😀x " (4 code points) + " ab " (4 code points)
+  const decoyAfter = " \u{1F600}x XXXX";     // untouched: matches " 😀x ", then diverges
+  const correctAfterNew = "ZZZZ ab ";        // edited: mismatches " 😀x ", then matches " ab " exactly
+  const md = `${before} the plan${decoyAfter}\n${before} the plan${correctAfterNew}`;
+  const anchor = { text: "the plan", occurrence: 1, before: before.slice(-30), after: recordedAfter };
+  checkIdx("S19 an emoji in a kept run is not worth an extra point", md, anchor, null);
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
