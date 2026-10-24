@@ -148,6 +148,17 @@ def test_normalize_pinned_vectors():
         assert loop.normalize(v["doc"]) == v["want"], v["doc"]
 
 
+def test_normalize_is_idempotent():
+    # A bare marker line joined to the next used to read as a list (or heading)
+    # on the second pass; the turn page's self-check then refused an untouched
+    # document (review-loop#14).
+    docs = [v["doc"] for v in VECTORS["normalize"]] + VECTORS["roundtrip"] + [
+        "*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx", "*\nfoo\nbar"]
+    for doc in docs:
+        once = loop.normalize(doc)
+        assert loop.normalize(once) == once, repr(doc)
+
+
 def test_block_kind_pinned_vectors():
     for v in VECTORS["kind"]:
         assert loop.block_kind(v["doc"]) == v["want"], v["doc"]

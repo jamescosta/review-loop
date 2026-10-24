@@ -36,6 +36,11 @@ const label = (md) => JSON.stringify(md.length > 42 ? md.slice(0, 42) + "…" : 
 for (const v of VECTORS.normalize) {
   check(`normalize ${label(v.doc)}`, mod.normalize(v.doc), v.want);
 }
+for (const md of VECTORS.normalize.map((v) => v.doc).concat(VECTORS.roundtrip,
+    ["*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx"])) {
+  const once = mod.normalize(md);
+  check(`normalize is idempotent ${label(md)}`, mod.normalize(once), once);
+}
 for (const v of VECTORS.kind) {
   check(`blockKind ${label(v.doc)}`, mod.blockKind(v.doc), v.want);
 }

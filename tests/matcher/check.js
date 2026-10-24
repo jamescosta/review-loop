@@ -231,5 +231,52 @@ function checkIdx(name, md, anchor, wantIdx) {
   checkIdx("S19 an emoji in a kept run is not worth an extra point", md, anchor, null);
 }
 
+// bestRun used to slice both arrays afresh on every skip; it now compares by
+// index. The reference below is that original, kept verbatim, and the two must
+// agree on every input — including emoji, where a code point is two UTF-16 units.
+{
+  const refRunForward = (recorded, actual) => {
+    let n = 0;
+    while (n < recorded.length && n < actual.length && recorded[n] === actual[n]) n += 1;
+    return n;
+  };
+  const refBestRun = (recorded, actual, forward) => {
+    const rPoints = [...recorded], aPoints = [...actual];
+    const r = forward ? rPoints : rPoints.reverse();
+    const a = forward ? aPoints : aPoints.reverse();
+    const recordedLength = r.length;
+    let bestKept = "", bestScore = 0;
+    for (let skip = 0; skip < r.length; skip += 1) {
+      const n = refRunForward(r.slice(skip), a.slice(skip));
+      const points = r.slice(skip, skip + n);
+      const kept = (forward ? points : points.reverse()).join("");
+      const score = mod.evidence(kept, recordedLength);
+      if (score > bestScore) { bestScore = score; bestKept = kept; }
+      if (n === r.length - skip) break;
+    }
+    return bestKept;
+  };
+  let seed = 12345;
+  const rand = (k) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % k; };
+  const alphabet = ["a", "b", " ", " ", "x", "\u{1F600}", "\u00e9"];
+  const word = (len) => Array.from({ length: len }, () => alphabet[rand(alphabet.length)]).join("");
+  let mismatches = 0, cases = 0;
+  for (let t = 0; t < 2000; t += 1) {
+    const recorded = word(rand(12));
+    // Mostly a mutated copy of the recorded text, so long runs and skips occur.
+    const actual = rand(4) === 0 ? word(rand(12))
+      : [...recorded].map((c) => (rand(6) === 0 ? alphabet[rand(alphabet.length)] : c)).join("");
+    for (const forward of [true, false]) {
+      cases += 1;
+      if (mod.bestRun(recorded, actual, forward) !== refBestRun(recorded, actual, forward)) {
+        mismatches += 1;
+        if (mismatches < 4) console.log("  differs on", JSON.stringify([recorded, actual, forward]));
+      }
+    }
+  }
+  console.log(`${mismatches ? "FAIL" : "PASS"}  S20 bestRun agrees with the slicing reference (${cases} cases)`);
+  if (mismatches) failures += 1;
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
