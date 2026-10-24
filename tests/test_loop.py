@@ -153,7 +153,8 @@ def test_normalize_is_idempotent():
     # on the second pass; the turn page's self-check then refused an untouched
     # document (review-loop#14).
     docs = [v["doc"] for v in VECTORS["normalize"]] + VECTORS["roundtrip"] + [
-        "*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx", "*\nfoo\nbar"]
+        "*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx", "*\nfoo\nbar",
+        "2.\n#\nfoo", "*\n#\nfoo"]
     for doc in docs:
         once = loop.normalize(doc)
         assert loop.normalize(once) == once, repr(doc)

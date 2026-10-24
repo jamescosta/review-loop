@@ -37,7 +37,7 @@ for (const v of VECTORS.normalize) {
   check(`normalize ${label(v.doc)}`, mod.normalize(v.doc), v.want);
 }
 for (const md of VECTORS.normalize.map((v) => v.doc).concat(VECTORS.roundtrip,
-    ["*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx"])) {
+    ["*\nfoo", "#\nfoo", "1.\nfoo", "*\n\ufeff", "-\n*\nx", "2.\n#\nfoo", "*\n#\nfoo"])) {
   const once = mod.normalize(md);
   check(`normalize is idempotent ${label(md)}`, mod.normalize(once), once);
 }

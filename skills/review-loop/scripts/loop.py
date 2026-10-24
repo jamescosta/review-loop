@@ -268,11 +268,11 @@ def paragraph_text(lines):
     """A paragraph's lines joined into one. The join is where a bare marker
     line ("*", "#", "1.") would acquire the space that makes the result read as
     a list on the next pass and be rewritten ("*" to "-", "2." to "1."), so a
-    join that normalizes to something else keeps the first line break instead —
+    join that normalizes to something else keeps its line breaks instead —
     normalize(normalize(d)) == normalize(d)."""
     joined = collapse(" ".join(lines))
     if len(lines) > 1 and normalize(joined) != joined:
-        return collapse(lines[0]) + "\n" + collapse(" ".join(lines[1:]))
+        return "\n".join(collapse(l) for l in lines)
     return joined
 
 
