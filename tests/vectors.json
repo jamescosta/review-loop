@@ -1,6 +1,11 @@
 {
   "_comment": "Pinned markdown block-model vectors, asserted against loop.py by tests/test_loop.py and against template.html by tests/matcher/roundtrip.js. The two implementations are mirrored by hand, so one vector list read by both runtimes is what stops them drifting apart.",
   "normalize": [
+    { "doc": "*\nfoo", "want": "*\nfoo" },
+    { "doc": "#\nfoo\nbar", "want": "# foo bar" },
+    { "doc": "2.\nfoo\n", "want": "2.\nfoo" },
+    { "doc": "-\n*\nx", "want": "- * x" },
+    { "doc": "2.\n#\nfoo", "want": "2.\n#\nfoo" },
     { "doc": "# Title\ntrailing text", "want": "# Title\n\ntrailing text" },
     { "doc": "intro\n# Title\nbody", "want": "intro\n\n# Title\n\nbody" },
     { "doc": "###### H6\ntext", "want": "###### H6\n\ntext" },

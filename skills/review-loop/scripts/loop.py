@@ -264,6 +264,18 @@ def collapse(line):
     return trim(re.sub(r"[ \t]+", " ", line))
 
 
+def paragraph_text(lines):
+    """A paragraph's lines joined into one. The join is where a bare marker
+    line ("*", "#", "1.") would acquire the space that makes the result read as
+    a list on the next pass and be rewritten ("*" to "-", "2." to "1."), so a
+    join that normalizes to something else keeps its line breaks instead —
+    normalize(normalize(d)) == normalize(d)."""
+    joined = collapse(" ".join(lines))
+    if len(lines) > 1 and normalize(joined) != joined:
+        return "\n".join(collapse(l) for l in lines)
+    return joined
+
+
 def normalize(doc):
     # Paragraph-wise whitespace normalization: browser DOM churn (nbsp,
     # soft-wrap joins, doubled spaces) must not masquerade as edits.
@@ -300,7 +312,7 @@ def normalize(doc):
                     items.append(c)
             out.append("\n".join(items))
         else:
-            out.append(collapse(" ".join(lines)))
+            out.append(paragraph_text(lines))
     return "\n\n".join(out)
 
 

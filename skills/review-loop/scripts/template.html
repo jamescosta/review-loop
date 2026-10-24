@@ -420,6 +420,19 @@ function quoted(text, n) {
   return "“" + text.slice(0, n) + (text.length > n ? "…" : "") + "”";
 }
 
+// A paragraph's lines joined into one. The join is where a bare marker line
+// ("*", "2.") would acquire the space that makes the result read as a list on
+// the next pass and be rewritten ("*" to "-", "2." to "1."), so a join that
+// normalizes to something else keeps its line breaks instead —
+// normalize(normalize(d)) === normalize(d). Mirrors loop.py's paragraph_text.
+function paragraphText(lines) {
+  const joined = collapse(lines.join(" "));
+  if (lines.length > 1 && normalize(joined) !== joined) {
+    return lines.map(collapse).join("\n");
+  }
+  return joined;
+}
+
 function normalize(doc) {
   doc = doc.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(NBSP_RE, " ");
   const out = [];
@@ -439,7 +452,7 @@ function normalize(doc) {
         trimEnd("  ".repeat(it.level) + (it.ordered ? "1." : "-") + " " +
           collapse(it.text))).join("\n"));
     } else {
-      out.push(collapse(lines.join(" ")));
+      out.push(paragraphText(lines));
     }
   }
   return out.join("\n\n");
@@ -863,9 +876,12 @@ function pointOffset(container, offset, map) {
   return entry ? entry.start + last.nodeValue.length : null;
 }
 
-function runForward(recorded, actual) {
+// How far `recorded` and `actual` agree starting `skip` code points in. Indexed
+// rather than sliced: bestRun calls it once per skip, per candidate occurrence.
+function runForward(recorded, actual, skip) {
   let n = 0;
-  while (n < recorded.length && n < actual.length && recorded[n] === actual[n]) n += 1;
+  while (skip + n < recorded.length && skip + n < actual.length &&
+         recorded[skip + n] === actual[skip + n]) n += 1;
   return n;
 }
 
@@ -909,11 +925,14 @@ function bestRun(recorded, actual, forward) {
   const recordedLength = r.length; // code points, not recorded.length (UTF-16 units)
   let bestKept = "", bestScore = 0;
   for (let skip = 0; skip < r.length; skip += 1) {
-    const n = runForward(r.slice(skip), a.slice(skip));
-    const points = r.slice(skip, skip + n);
-    const kept = (forward ? points : points.reverse()).join("");
-    const score = evidence(kept, recordedLength);
-    if (score > bestScore) { bestScore = score; bestKept = kept; }
+    const n = runForward(r, a, skip);
+    if (n > 0) {
+      // Only a run that survives is worth building: an empty one scores 0.
+      const points = r.slice(skip, skip + n);
+      const kept = (forward ? points : points.reverse()).join("");
+      const score = evidence(kept, recordedLength);
+      if (score > bestScore) { bestScore = score; bestKept = kept; }
+    }
     if (n === r.length - skip) break;
   }
   return bestKept;

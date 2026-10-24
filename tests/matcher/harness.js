@@ -97,7 +97,7 @@ function loadModule(templatePath) {
   const factory = new Function("document", body +
     "\nreturn { splitBlocks, blockKind, renderMarkdown, docTextAndMap, locateAnchor," +
     " segmentsFor, normalize, serialize, fnv1a, insertRow, insertColumn," +
-    " tableRows, tableCells };");
+    " tableRows, tableCells, bestRun, evidence };");
   return factory(makeShim());
 }
 
